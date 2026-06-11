@@ -1,0 +1,38 @@
+project:
+  name: road-detection
+  processing_crs: EPSG:3857
+  output_crs: EPSG:3857
+
+imagery:
+  # Point this at a Cloud Optimized GeoTIFF or local GeoTIFF.
+  source: data/imagery/example-cog.tif
+  bands: [1, 2, 3]
+
+tiling:
+  tile_size: 1024
+  overlap: 128
+  output_dir: data/tiles
+
+model:
+  # Export your road segmentation model to ONNX and place it here.
+  # Expected input: RGB image tensor shaped [1, 3, H, W].
+  path: models/road-segmentation.onnx
+  input_size: 1024
+  mean: [0.485, 0.456, 0.406]
+  std: [0.229, 0.224, 0.225]
+  output_name:
+
+inference:
+  threshold: 0.5
+  batch_size: 1
+  mask_dir: outputs/road_masks
+
+vectorization:
+  min_area_m2: 15
+  simplify_tolerance_m: 0.5
+  output: outputs/roads.gpkg
+
+postgis:
+  url: postgresql+psycopg://geoai:geoai@localhost:5432/geoai
+  schema: public
+  table: detected_roads

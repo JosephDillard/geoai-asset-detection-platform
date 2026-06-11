@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geoai-road-detection-platform"
+version = "0.1.0"
+description = "GeoAI road detection pipeline for COG imagery, segmentation masks, vectors, and PostGIS."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "click>=8.1",
+  "geopandas>=0.14",
+  "numpy>=1.24",
+  "onnxruntime>=1.17",
+  "pyyaml>=6.0",
+  "rasterio>=1.3",
+  "shapely>=2.0",
+  "sqlalchemy>=2.0",
+  "geoalchemy2>=0.14",
+  "psycopg[binary]>=3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.5",
+  "pytest>=8.0",
+]
+
+[project.scripts]
+geoai-roads = "geoai_roads.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

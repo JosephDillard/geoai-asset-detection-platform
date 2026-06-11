@@ -1,0 +1,21 @@
+services:
+  postgis:
+    image: postgis/postgis:16-3.4
+    container_name: geoai-road-postgis
+    environment:
+      POSTGRES_DB: geoai
+      POSTGRES_USER: geoai
+      POSTGRES_PASSWORD: geoai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgis-data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geoai -d geoai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgis-data:
