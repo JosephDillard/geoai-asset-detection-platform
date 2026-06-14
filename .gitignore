@@ -14,3 +14,5 @@ outputs/
 .env
 .env.*
 !.env.example
+
+geoai-api*.log

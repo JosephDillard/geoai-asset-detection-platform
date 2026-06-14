@@ -1,8 +1,32 @@
-# Define up to 10 GeoAI workflows. Paths are relative to this catalog file.
+# Define request-time model choices and up to 10 GeoAI workflows.
+# Paths are relative to this catalog file.
+models:
+  - id: road-detection
+    name: Detect roads
+    description: Identify road surfaces from local imagery and optionally load results to PostGIS.
+    asset_type: roads
+    geometry_type: polygon
+    workflow_ids: [roads-local, roads-local-postgis]
+
+  - id: solar-panel-detection
+    name: Detect solar panels
+    description: Identify solar panel arrays from imagery. Workflow config is not enabled yet.
+    asset_type: solar_panels
+    geometry_type: polygon
+    workflow_ids: []
+
+  - id: electric-pole-detection
+    name: Detect electric poles
+    description: Identify electric utility poles from imagery. Workflow config is not enabled yet.
+    asset_type: electric_poles
+    geometry_type: point
+    workflow_ids: []
+
 workflows:
   - id: roads-local
     name: Road detection - local imagery
     type: roads
+    model: road-detection
     enabled: true
     config: roads.example.yaml
     stages: [tile, infer, vectorize]
@@ -10,6 +34,7 @@ workflows:
   - id: roads-local-postgis
     name: Road detection - local imagery to PostGIS
     type: roads
+    model: road-detection
     enabled: false
     config: roads.example.yaml
     stages: [tile, infer, vectorize, load-postgis]

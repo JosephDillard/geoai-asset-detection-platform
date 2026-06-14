@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from geoai_roads.orchestrator import (
     MAX_WORKFLOWS,
     WorkflowDefinition,
+    WorkflowCatalog,
     WorkflowResult,
     load_workflow_catalog,
     normalize_road_stages,
@@ -24,7 +25,10 @@ from geoai_roads.orchestrator import (
 )
 
 DEFAULT_CATALOG = "config/workflows.example.yaml"
-DEFAULT_CORS_ORIGINS = "http://localhost:8080,http://127.0.0.1:8080"
+DEFAULT_CORS_ORIGINS = (
+    "http://localhost:8080,http://127.0.0.1:8080,"
+    "http://localhost:18088,http://127.0.0.1:18088"
+)
 
 
 class RequestSource(str, Enum):
@@ -107,6 +111,10 @@ class RunRequest(BaseModel):
         default=None,
         description="Workflow catalog path. Defaults to the server catalog.",
     )
+    model_id: str | None = Field(
+        default=None,
+        description="Optional model choice such as road-detection or solar-panel-detection.",
+    )
     workflow_ids: list[str] | None = Field(
         default=None,
         description="Workflow ids to run. Omit to run enabled workflows from the catalog.",
@@ -135,6 +143,7 @@ class RunRecord:
     notes: str | None
     map_context: dict[str, Any] | None
     catalog_path: str
+    model_id: str | None
     requested_workflows: list[str]
     stages_override: list[str] | None
     created_at: datetime = field(default_factory=_now)
@@ -153,6 +162,7 @@ class RunRecord:
             "notes": self.notes,
             "map_context": self.map_context,
             "catalog_path": self.catalog_path,
+            "model_id": self.model_id,
             "requested_workflows": self.requested_workflows,
             "stages_override": self.stages_override,
             "created_at": _format_time(self.created_at),
@@ -184,6 +194,7 @@ class RunStore:
             notes=request.notes,
             map_context=request.map_context.as_dict() if request.map_context else None,
             catalog_path=str(catalog_path),
+            model_id=request.model_id,
             requested_workflows=[workflow.id for workflow in workflows],
             stages_override=stages_override,
         )
@@ -245,6 +256,24 @@ def create_app(
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/")
+    def root(catalog_path: str | None = None) -> dict[str, Any]:
+        catalog = _load_catalog_or_400(catalog_path or app.state.default_catalog)
+        return {
+            "service": "GeoAI Workflow API",
+            "status": "ok",
+            "version": app.version,
+            "links": {
+                "docs": "/docs",
+                "health": "/health",
+                "workflows": "/workflows",
+                "run_options": "/run-options",
+                "runs": "/runs",
+            },
+            "max_workflows": MAX_WORKFLOWS,
+            "models": [model.as_dict() for model in catalog.models],
+        }
+
     @app.get("/workflows")
     def list_workflows(catalog_path: str | None = None) -> dict[str, Any]:
         catalog = _load_catalog_or_400(catalog_path or app.state.default_catalog)
@@ -257,12 +286,14 @@ def create_app(
             "request_sources": [source.value for source in RequestSource],
             "stages": [stage.value for stage in RoadStage],
             "max_workflows": MAX_WORKFLOWS,
+            "models": [model.as_dict() for model in catalog.models],
             "workflows": [
                 {
                     "id": workflow.id,
                     "name": workflow.name,
                     "enabled": workflow.enabled,
                     "type": workflow.workflow_type,
+                    "model_id": workflow.model_id,
                     "default_stages": list(workflow.stages),
                 }
                 for workflow in catalog.workflows
@@ -273,7 +304,8 @@ def create_app(
     def create_run(request: RunRequest) -> dict[str, Any]:
         catalog = _load_catalog_or_400(request.catalog_path or app.state.default_catalog)
         try:
-            workflows = catalog.select(request.workflow_ids)
+            _validate_model_id(catalog, request.model_id)
+            workflows = catalog.select(request.workflow_ids, request.model_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -330,3 +362,12 @@ def _load_catalog_or_400(path: str | Path):
         return load_workflow_catalog(path)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _validate_model_id(catalog: WorkflowCatalog, model_id: str | None) -> None:
+    if not model_id:
+        return
+
+    model_ids = {model.id for model in catalog.models}
+    if model_id not in model_ids:
+        raise ValueError(f"Unknown model id: {model_id}")

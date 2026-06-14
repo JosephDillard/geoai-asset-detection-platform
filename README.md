@@ -131,10 +131,10 @@ Start the API server:
 geoai-roads serve --host 127.0.0.1 --port 8000 --catalog config/workflows.example.yaml
 ```
 
-For browser clients such as the status board map viewer, set allowed origins with:
+For direct browser clients, set allowed origins with:
 
 ```powershell
-$env:GEOAI_CORS_ORIGINS="http://localhost:8080,http://127.0.0.1:8080"
+$env:GEOAI_CORS_ORIGINS="http://localhost:8080,http://127.0.0.1:8080,http://localhost:18088,http://127.0.0.1:18088"
 ```
 
 Open the interactive API UI at:
@@ -146,6 +146,8 @@ http://127.0.0.1:8000/docs
 The manual form in `/docs` uses dropdowns for fixed choices such as request
 source and workflow stages. External apps submit the same JSON body to `POST /runs`.
 Use `GET /run-options` to populate dropdown values in another app or a custom GUI.
+The Geospatial Status Board map uses its Grails `/geoAi/*` same-origin proxy, which
+forwards to this API and avoids browser CORS issues.
 
 Useful endpoints:
 
@@ -176,6 +178,7 @@ External app example:
   "request_source": "external_app",
   "submitted_by": "asset-management-system",
   "external_request_id": "AMS-2026-00042",
+  "model_id": "road-detection",
   "workflow_ids": ["roads-local"],
   "stages": ["tile", "infer", "vectorize"],
   "map_context": {

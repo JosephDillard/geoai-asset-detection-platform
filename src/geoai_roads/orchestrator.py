@@ -12,6 +12,32 @@ MAX_WORKFLOWS = 10
 ROAD_STAGES = ("tile", "infer", "vectorize", "load-postgis")
 DEFAULT_ROAD_STAGES = ("tile", "infer", "vectorize")
 POSTGIS_IF_EXISTS = ("fail", "replace", "append")
+DEFAULT_MODEL_DEFINITIONS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "road-detection",
+        "name": "Detect roads",
+        "description": "Identify road surfaces from local imagery and optionally load results to PostGIS.",
+        "asset_type": "roads",
+        "geometry_type": "polygon",
+        "workflow_ids": ["roads-local", "roads-local-postgis"],
+    },
+    {
+        "id": "solar-panel-detection",
+        "name": "Detect solar panels",
+        "description": "Identify solar panel arrays from imagery. Workflow config is not enabled yet.",
+        "asset_type": "solar_panels",
+        "geometry_type": "polygon",
+        "workflow_ids": [],
+    },
+    {
+        "id": "electric-pole-detection",
+        "name": "Detect electric poles",
+        "description": "Identify electric utility poles from imagery. Workflow config is not enabled yet.",
+        "asset_type": "electric_poles",
+        "geometry_type": "point",
+        "workflow_ids": [],
+    },
+)
 
 
 @dataclass(frozen=True)
@@ -31,11 +57,34 @@ class StageResult:
 
 
 @dataclass(frozen=True)
+class ModelDefinition:
+    id: str
+    name: str
+    description: str
+    asset_type: str
+    geometry_type: str
+    enabled: bool = True
+    workflow_ids: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "asset_type": self.asset_type,
+            "geometry_type": self.geometry_type,
+            "enabled": self.enabled,
+            "workflow_ids": list(self.workflow_ids),
+        }
+
+
+@dataclass(frozen=True)
 class WorkflowDefinition:
     id: str
     name: str
     workflow_type: str
     config_path: Path
+    model_id: str | None = None
     enabled: bool = True
     stages: tuple[str, ...] = DEFAULT_ROAD_STAGES
     postgis_if_exists: str = "append"
@@ -46,6 +95,7 @@ class WorkflowDefinition:
             "name": self.name,
             "type": self.workflow_type,
             "config_path": str(self.config_path),
+            "model_id": self.model_id,
             "enabled": self.enabled,
             "stages": list(self.stages),
             "postgis_if_exists": self.postgis_if_exists,
@@ -74,8 +124,13 @@ class WorkflowResult:
 class WorkflowCatalog:
     path: Path
     workflows: tuple[WorkflowDefinition, ...]
+    models: tuple[ModelDefinition, ...]
 
-    def select(self, workflow_ids: Iterable[str] | None = None) -> list[WorkflowDefinition]:
+    def select(
+        self,
+        workflow_ids: Iterable[str] | None = None,
+        model_id: str | None = None,
+    ) -> list[WorkflowDefinition]:
         if workflow_ids:
             workflow_map = {workflow.id: workflow for workflow in self.workflows}
             selected = []
@@ -88,6 +143,25 @@ class WorkflowCatalog:
                     selected.append(workflow)
             if missing:
                 raise ValueError(f"Unknown workflow id(s): {', '.join(missing)}")
+            if model_id:
+                mismatched = [
+                    workflow.id
+                    for workflow in selected
+                    if workflow.model_id and workflow.model_id != model_id
+                ]
+                if mismatched:
+                    raise ValueError(
+                        f"Selected workflow id(s) do not match model {model_id}: "
+                        f"{', '.join(mismatched)}"
+                    )
+        elif model_id:
+            selected = [
+                workflow
+                for workflow in self.workflows
+                if workflow.enabled and workflow.model_id == model_id
+            ]
+            if not selected:
+                raise ValueError(f"No enabled workflows selected for model: {model_id}")
         else:
             selected = [workflow for workflow in self.workflows if workflow.enabled]
 
@@ -101,6 +175,7 @@ class WorkflowCatalog:
         return {
             "path": str(self.path),
             "max_workflows": MAX_WORKFLOWS,
+            "models": [model.as_dict() for model in self.models],
             "workflows": [workflow.as_dict() for workflow in self.workflows],
         }
 
@@ -109,6 +184,16 @@ def load_workflow_catalog(path: str | Path) -> WorkflowCatalog:
     catalog_path = Path(path).resolve()
     with catalog_path.open("r", encoding="utf-8") as file:
         raw = yaml.safe_load(file) or {}
+
+    model_items = raw.get("models", DEFAULT_MODEL_DEFINITIONS)
+    if not isinstance(model_items, list) and not isinstance(model_items, tuple):
+        raise ValueError("Workflow catalog models must be a list")
+
+    models = tuple(_parse_model(item) for item in model_items)
+    model_ids = [model.id for model in models]
+    duplicate_models = sorted({model_id for model_id in model_ids if model_ids.count(model_id) > 1})
+    if duplicate_models:
+        raise ValueError(f"Duplicate model id(s): {', '.join(duplicate_models)}")
 
     workflow_items = raw.get("workflows")
     if not isinstance(workflow_items, list):
@@ -124,7 +209,18 @@ def load_workflow_catalog(path: str | Path) -> WorkflowCatalog:
     if duplicates:
         raise ValueError(f"Duplicate workflow id(s): {', '.join(duplicates)}")
 
-    return WorkflowCatalog(path=catalog_path, workflows=workflows)
+    known_models = set(model_ids)
+    unknown_model_ids = sorted(
+        {
+            workflow.model_id
+            for workflow in workflows
+            if workflow.model_id and workflow.model_id not in known_models
+        }
+    )
+    if unknown_model_ids:
+        raise ValueError(f"Workflow references unknown model id(s): {', '.join(unknown_model_ids)}")
+
+    return WorkflowCatalog(path=catalog_path, workflows=workflows, models=models)
 
 
 def run_road_stage(
@@ -289,9 +385,33 @@ def _parse_workflow(item: Any, catalog_dir: Path) -> WorkflowDefinition:
         name=str(item.get("name", workflow_id)),
         workflow_type=workflow_type,
         config_path=_resolve_relative_path(config_value, catalog_dir),
+        model_id=str(item.get("model") or item.get("model_id") or "").strip() or None,
         enabled=bool(item.get("enabled", True)),
         stages=stages,
         postgis_if_exists=postgis_if_exists,
+    )
+
+
+def _parse_model(item: Any) -> ModelDefinition:
+    if not isinstance(item, dict):
+        raise ValueError("Each model must be a mapping")
+
+    model_id = str(item.get("id") or "").strip()
+    if not model_id:
+        raise ValueError("Each model must define an id")
+
+    workflow_ids = item.get("workflow_ids") or []
+    if isinstance(workflow_ids, (str, bytes)) or not isinstance(workflow_ids, Iterable):
+        raise ValueError(f"Model {model_id} workflow_ids must be a list")
+
+    return ModelDefinition(
+        id=model_id,
+        name=str(item.get("name") or model_id),
+        description=str(item.get("description") or ""),
+        asset_type=str(item.get("asset_type") or model_id),
+        geometry_type=str(item.get("geometry_type") or "unknown"),
+        enabled=bool(item.get("enabled", True)),
+        workflow_ids=tuple(str(workflow_id).strip() for workflow_id in workflow_ids if workflow_id),
     )
 
 
