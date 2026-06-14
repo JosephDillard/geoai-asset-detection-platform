@@ -62,6 +62,22 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+To generate local demo imagery and a tiny ONNX model for the default example
+workflow:
+
+```powershell
+python -m pip install -e ".[demo]"
+python scripts/create_demo_assets.py
+```
+
+The generated files are written to ignored local paths:
+
+- `data/imagery/example-cog.tif`
+- `models/road-segmentation.onnx`
+
+The demo model is intentionally simple and only proves the pipeline mechanics. Replace
+it with a trained segmentation model before using detections for real analysis.
+
 Optional PostGIS:
 
 ```powershell
