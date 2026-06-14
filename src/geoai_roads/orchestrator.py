@@ -304,6 +304,8 @@ def run_road_stage(
             min_area_m2=config.min_area_m2,
             simplify_tolerance_m=config.simplify_tolerance_m,
             smooth_tolerance_m=config.smooth_tolerance_m,
+            rectangularize=config.rectangularize,
+            rectangularize_min_area_ratio=config.rectangularize_min_area_ratio,
             max_mask_coverage=config.max_mask_coverage,
             max_source_pixel_size_m=config.max_source_pixel_size_m,
             class_name=config.class_name,

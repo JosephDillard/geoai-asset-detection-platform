@@ -236,6 +236,10 @@ Copy `config/roads.example.yaml` to a local config file and update:
 - `vectorization.min_area_m2`: remove tiny false-positive fragments
 - `vectorization.smooth_tolerance_m`: optional geometry smoothing in projected meters
   to soften blocky raster-mask edges before loading into GIS
+- `vectorization.rectangularize`: replace high-fill polygon masks with their minimum
+  rotated rectangles; useful for reducing jagged WHU building footprints
+- `vectorization.rectangularize_min_area_ratio`: minimum original-area-to-rectangle-area
+  ratio required before rectangularization is applied
 - `vectorization.max_source_pixel_size_m`: skip masks whose source pixel size is too
   coarse for road-surface extraction
 - `vectorization.max_mask_coverage`: skip a tile when an implausibly large fraction

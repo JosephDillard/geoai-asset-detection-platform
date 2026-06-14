@@ -36,6 +36,8 @@ vectorization:
   min_area_m2: 15
   simplify_tolerance_m: 0.5
   smooth_tolerance_m: 0
+  rectangularize: true
+  rectangularize_min_area_ratio: 0.0
   max_mask_coverage: 0.65
   max_source_pixel_size_m: 1.0
   output: outputs/whu_taos_buildings.gpkg

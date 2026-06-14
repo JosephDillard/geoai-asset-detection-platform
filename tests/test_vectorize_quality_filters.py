@@ -125,3 +125,37 @@ def test_vectorize_uses_mask_class_name_tag(tmp_path: Path) -> None:
     buildings = gpd.read_file(output)
     assert count == 1
     assert buildings.loc[0, "class_name"] == "building"
+
+
+def test_vectorize_can_rectangularize_building_masks(tmp_path: Path) -> None:
+    mask_dir = tmp_path / "masks"
+    output = tmp_path / "buildings.gpkg"
+    mask = np.zeros((10, 10), dtype="uint8")
+    mask[2:8, 2:8] = 1
+    mask[2, 2] = 0
+    mask[2, 7] = 0
+    mask[7, 2] = 0
+    mask[7, 7] = 0
+    _write_tagged_mask(
+        mask_dir / "jagged_building_mask.tif",
+        mask,
+        "EPSG:26913",
+        from_origin(0, 10, 1, 1),
+        "building",
+    )
+
+    count = vectorize_masks(
+        mask_dir=mask_dir,
+        output_path=output,
+        processing_crs="EPSG:26913",
+        output_crs="EPSG:26913",
+        min_area_m2=0,
+        simplify_tolerance_m=0,
+        rectangularize=True,
+    )
+
+    buildings = gpd.read_file(output)
+    polygon = buildings.geometry.iloc[0].geoms[0]
+    assert count == 1
+    assert len(polygon.exterior.coords) == 5
+    assert polygon.area == 36

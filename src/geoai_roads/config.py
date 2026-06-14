@@ -114,6 +114,14 @@ class RoadConfig:
         return float(self.raw["vectorization"].get("smooth_tolerance_m", 0))
 
     @property
+    def rectangularize(self) -> bool:
+        return bool(self.raw["vectorization"].get("rectangularize", False))
+
+    @property
+    def rectangularize_min_area_ratio(self) -> float:
+        return float(self.raw["vectorization"].get("rectangularize_min_area_ratio", 0.45))
+
+    @property
     def max_mask_coverage(self) -> float:
         return float(self.raw["vectorization"].get("max_mask_coverage", 0))
 

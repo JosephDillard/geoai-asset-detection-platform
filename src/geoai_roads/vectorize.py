@@ -20,6 +20,8 @@ def vectorize_masks(
     min_area_m2: float,
     simplify_tolerance_m: float,
     smooth_tolerance_m: float = 0,
+    rectangularize: bool = False,
+    rectangularize_min_area_ratio: float = 0.45,
     max_mask_coverage: float = 0,
     max_source_pixel_size_m: float = 0,
     class_name: str = "road",
@@ -75,6 +77,13 @@ def vectorize_masks(
     if simplify_tolerance_m > 0 and not roads.empty:
         roads["geometry"] = roads.geometry.simplify(simplify_tolerance_m, preserve_topology=True)
 
+    if rectangularize and not roads.empty:
+        roads["geometry"] = roads.geometry.apply(
+            lambda geometry: _rectangularize_geometry(geometry, rectangularize_min_area_ratio)
+        )
+        roads["geometry"] = roads.geometry.buffer(0)
+        roads = roads[~roads.geometry.is_empty & roads.geometry.notnull()].copy()
+
     if roads.empty:
         empty = gpd.GeoDataFrame(
             columns=["source_tile", "class_name", "confidence", "geometry"],
@@ -84,7 +93,8 @@ def vectorize_masks(
         _write_vector(empty, output_path)
         return 0
 
-    roads = roads.dissolve(by=["source_tile", "class_name"], as_index=False)
+    if not rectangularize:
+        roads = roads.dissolve(by=["source_tile", "class_name"], as_index=False)
 
     if smooth_tolerance_m > 0 and not roads.empty:
         roads["geometry"] = roads.geometry.buffer(smooth_tolerance_m).buffer(-smooth_tolerance_m)
@@ -164,6 +174,41 @@ def _as_multipolygon(geometry: Polygon | MultiPolygon) -> MultiPolygon:
         return MultiPolygon([geometry])
     polygons = [part for part in getattr(geometry, "geoms", []) if isinstance(part, Polygon)]
     return MultiPolygon(polygons)
+
+
+def _rectangularize_geometry(geometry, min_area_ratio: float):
+    if geometry is None or geometry.is_empty:
+        return geometry
+    if isinstance(geometry, Polygon):
+        return _rectangularize_polygon(geometry, min_area_ratio)
+    if isinstance(geometry, MultiPolygon):
+        polygons = [
+            _rectangularize_polygon(part, min_area_ratio)
+            for part in geometry.geoms
+            if isinstance(part, Polygon) and not part.is_empty
+        ]
+        return MultiPolygon([polygon for polygon in polygons if not polygon.is_empty])
+    polygons = [
+        _rectangularize_polygon(part, min_area_ratio)
+        for part in getattr(geometry, "geoms", [])
+        if isinstance(part, Polygon) and not part.is_empty
+    ]
+    return MultiPolygon([polygon for polygon in polygons if not polygon.is_empty])
+
+
+def _rectangularize_polygon(polygon: Polygon, min_area_ratio: float) -> Polygon:
+    polygon = polygon.buffer(0)
+    if polygon.is_empty or polygon.area <= 0:
+        return polygon
+
+    rectangle = polygon.minimum_rotated_rectangle
+    if not isinstance(rectangle, Polygon) or rectangle.is_empty or rectangle.area <= 0:
+        return polygon
+
+    area_ratio = polygon.area / rectangle.area
+    if area_ratio < min_area_ratio:
+        return polygon
+    return rectangle
 
 
 def _write_vector(frame: gpd.GeoDataFrame, output_path: Path) -> None:
