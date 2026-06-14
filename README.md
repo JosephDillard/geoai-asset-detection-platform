@@ -96,6 +96,16 @@ The matching workflow config is:
 
 - `config/roads.new-mexico.example.yaml`
 
+Build footprints for the local COGs and load them into the status-board PostGIS:
+
+```powershell
+python scripts\load_cog_footprints.py
+```
+
+This writes `outputs/cog_footprints.gpkg` and loads
+`public.geoai_cog_footprints`, which the status-board GeoServer can publish as
+a map layer.
+
 Optional PostGIS:
 
 ```powershell

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 
@@ -16,24 +17,36 @@ def load_vectors_to_postgis(
     schema: str,
     table: str,
     if_exists: str = "append",
+    job_id: str | None = None,
+    metadata: dict[str, str] | None = None,
 ) -> int:
-    roads = gpd.read_file(vector_path)
-    if roads.empty:
-        return 0
-    if roads.crs is None:
+    frame = gpd.read_file(vector_path)
+    if frame.crs is None:
         raise ValueError("Vector output must define a CRS before loading into PostGIS.")
 
     _validate_identifier(schema, "schema")
     _validate_identifier(table, "table")
 
-    roads = roads.rename_geometry("geom")
-    geometry_dtype = Geometry("GEOMETRY", srid=roads.crs.to_epsg() or -1)
-
     engine = create_engine(database_url)
     with engine.begin() as connection:
         connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
+        if frame.empty:
+            if if_exists == "replace":
+                connection.execute(text(f"DROP TABLE IF EXISTS {schema}.{table}"))
+            return 0
 
-    roads.to_postgis(
+    frame = frame.rename_geometry("geom")
+    if job_id:
+        frame["job_id"] = job_id
+    for key, value in (metadata or {}).items():
+        _validate_identifier(key, "metadata column")
+        frame[key] = value
+    if job_id or metadata:
+        frame["loaded_at"] = datetime.now(timezone.utc).isoformat()
+
+    geometry_dtype = Geometry("GEOMETRY", srid=frame.crs.to_epsg() or -1)
+
+    frame.to_postgis(
         table,
         engine,
         schema=schema,
@@ -41,7 +54,7 @@ def load_vectors_to_postgis(
         index=False,
         dtype={"geom": geometry_dtype},
     )
-    return len(roads)
+    return len(frame)
 
 
 def _validate_identifier(value: str, label: str) -> None:

@@ -227,6 +227,9 @@ def run_road_stage(
     config: RoadConfig,
     stage: str,
     postgis_if_exists: str = "append",
+    map_context: dict[str, Any] | None = None,
+    job_id: str | None = None,
+    workflow_id: str | None = None,
 ) -> StageResult:
     if stage == "tile":
         from geoai_roads.tiling import extract_tiles
@@ -237,6 +240,8 @@ def run_road_stage(
             bands=config.imagery_bands,
             tile_size=config.tile_size,
             overlap=config.tile_overlap,
+            bbox=(map_context or {}).get("bbox"),
+            aoi_geojson=(map_context or {}).get("aoi_geojson"),
         )
         return StageResult(
             stage,
@@ -292,6 +297,8 @@ def run_road_stage(
             schema=config.postgis_schema,
             table=config.postgis_table,
             if_exists=postgis_if_exists,
+            job_id=job_id or workflow_id or config.raw.get("project", {}).get("name"),
+            metadata={"workflow_id": workflow_id} if workflow_id else None,
         )
         return StageResult(
             stage,
@@ -306,17 +313,24 @@ def run_road_pipeline(
     config_path: str | Path,
     stages: Iterable[str] | None = None,
     postgis_if_exists: str = "append",
+    map_context: dict[str, Any] | None = None,
+    job_id: str | None = None,
 ) -> list[StageResult]:
     selected_stages = normalize_road_stages(stages or DEFAULT_ROAD_STAGES)
     _validate_postgis_if_exists(postgis_if_exists)
 
     config = load_config(config_path)
-    return [run_road_stage(config, stage, postgis_if_exists) for stage in selected_stages]
+    return [
+        run_road_stage(config, stage, postgis_if_exists, map_context=map_context, job_id=job_id)
+        for stage in selected_stages
+    ]
 
 
 def run_workflow(
     workflow: WorkflowDefinition,
     stages: Iterable[str] | None = None,
+    map_context: dict[str, Any] | None = None,
+    job_id: str | None = None,
 ) -> WorkflowResult:
     stage_results: list[StageResult] = []
     try:
@@ -328,7 +342,16 @@ def run_workflow(
         config = load_config(workflow.config_path)
 
         for stage in selected_stages:
-            stage_results.append(run_road_stage(config, stage, workflow.postgis_if_exists))
+            stage_results.append(
+                run_road_stage(
+                    config,
+                    stage,
+                    workflow.postgis_if_exists,
+                    map_context=map_context,
+                    job_id=job_id or workflow.id,
+                    workflow_id=workflow.id,
+                )
+            )
 
         return WorkflowResult(
             workflow_id=workflow.id,

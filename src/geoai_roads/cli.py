@@ -52,10 +52,11 @@ def vectorize(config_path: str) -> None:
     default="append",
     show_default=True,
 )
-def load_postgis(config_path: str, if_exists: str) -> None:
+@click.option("--job-id", default=None, help="Optional job id written to loaded features.")
+def load_postgis(config_path: str, if_exists: str, job_id: str | None) -> None:
     """Load vectorized roads into PostGIS."""
     config = load_config(config_path)
-    _echo_stage_result(run_road_stage(config, "load-postgis", if_exists))
+    _echo_stage_result(run_road_stage(config, "load-postgis", if_exists, job_id=job_id))
 
 
 @main.command()

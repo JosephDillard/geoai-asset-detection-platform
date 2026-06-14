@@ -58,6 +58,10 @@ class MapContext(BaseModel):
         min_length=4,
         max_length=4,
     )
+    area_source: str | None = Field(
+        default=None,
+        description="Whether bbox came from the map view or a drawn AOI.",
+    )
     map_center: list[float] | None = Field(
         default=None,
         description="Optional [longitude, latitude] map center in EPSG:4326.",
@@ -348,9 +352,17 @@ def _execute_run(
     workflows: list[WorkflowDefinition],
     stages_override: list[str] | None,
 ) -> None:
-    store.update(run_id, status="running", started_at=_now())
+    record = store.update(run_id, status="running", started_at=_now())
     try:
-        results = [run_workflow(workflow, stages_override) for workflow in workflows]
+        results = [
+            run_workflow(
+                workflow,
+                stages_override,
+                map_context=record.map_context,
+                job_id=run_id,
+            )
+            for workflow in workflows
+        ]
         status = "failed" if any(result.status == "failed" for result in results) else "succeeded"
         store.update(run_id, status=status, results=results, finished_at=_now())
     except Exception as exc:

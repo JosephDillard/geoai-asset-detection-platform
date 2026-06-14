@@ -91,6 +91,10 @@ def infer_tiles(
     output_name: str | None = None,
 ) -> int:
     mask_dir.mkdir(parents=True, exist_ok=True)
+    for mask_path in mask_dir.glob("*_road_mask.tif"):
+        if mask_path.is_file():
+            mask_path.unlink()
+
     session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
     input_name = session.get_inputs()[0].name
 
