@@ -4,12 +4,14 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+import os
 from pathlib import Path
 from threading import Lock
 from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from geoai_roads.orchestrator import (
@@ -22,6 +24,7 @@ from geoai_roads.orchestrator import (
 )
 
 DEFAULT_CATALOG = "config/workflows.example.yaml"
+DEFAULT_CORS_ORIGINS = "http://localhost:8080,http://127.0.0.1:8080"
 
 
 class RequestSource(str, Enum):
@@ -36,12 +39,55 @@ class RoadStage(str, Enum):
     load_postgis = "load-postgis"
 
 
+class MapContext(BaseModel):
+    source_app: str | None = Field(
+        default=None,
+        description="App that captured the map context, for example geospatial-status-board.",
+    )
+    aoi_geojson: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional GeoJSON geometry or FeatureCollection drawn in the map viewer.",
+    )
+    bbox: list[float] | None = Field(
+        default=None,
+        description="Optional [west, south, east, north] bounds in EPSG:4326.",
+        min_length=4,
+        max_length=4,
+    )
+    map_center: list[float] | None = Field(
+        default=None,
+        description="Optional [longitude, latitude] map center in EPSG:4326.",
+        min_length=2,
+        max_length=2,
+    )
+    zoom: float | None = Field(
+        default=None,
+        description="Optional MapLibre zoom level when the request was submitted.",
+    )
+    selected_layer: str | None = Field(
+        default=None,
+        description="Optional status-board layer key active when the request was submitted.",
+    )
+    selected_feature_ids: list[str] | None = Field(
+        default=None,
+        description="Optional selected feature ids from the map viewer.",
+    )
+
+    def as_dict(self) -> dict[str, Any]:
+        return self.model_dump(exclude_none=True)
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
 def _format_time(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
+
+
+def _cors_origins_from_env() -> list[str]:
+    raw = os.getenv("GEOAI_CORS_ORIGINS", DEFAULT_CORS_ORIGINS)
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
 class RunRequest(BaseModel):
@@ -69,6 +115,10 @@ class RunRequest(BaseModel):
         default=None,
         description="Optional stage override for every selected workflow.",
     )
+    map_context: MapContext | None = Field(
+        default=None,
+        description="Optional MapLibre viewer context such as drawn AOI, bbox, or selected layer.",
+    )
     notes: str | None = Field(
         default=None,
         description="Optional operator or upstream app notes for this run.",
@@ -83,6 +133,7 @@ class RunRecord:
     submitted_by: str | None
     external_request_id: str | None
     notes: str | None
+    map_context: dict[str, Any] | None
     catalog_path: str
     requested_workflows: list[str]
     stages_override: list[str] | None
@@ -100,6 +151,7 @@ class RunRecord:
             "submitted_by": self.submitted_by,
             "external_request_id": self.external_request_id,
             "notes": self.notes,
+            "map_context": self.map_context,
             "catalog_path": self.catalog_path,
             "requested_workflows": self.requested_workflows,
             "stages_override": self.stages_override,
@@ -130,6 +182,7 @@ class RunStore:
             submitted_by=request.submitted_by,
             external_request_id=request.external_request_id,
             notes=request.notes,
+            map_context=request.map_context.as_dict() if request.map_context else None,
             catalog_path=str(catalog_path),
             requested_workflows=[workflow.id for workflow in workflows],
             stages_override=stages_override,
@@ -160,12 +213,26 @@ class RunStore:
         return record
 
 
-def create_app(default_catalog: str | Path = DEFAULT_CATALOG, max_workers: int = 2) -> FastAPI:
+def create_app(
+    default_catalog: str | Path = DEFAULT_CATALOG,
+    max_workers: int = 2,
+    allowed_origins: list[str] | None = None,
+) -> FastAPI:
     app = FastAPI(
         title="GeoAI Workflow API",
         version="0.1.0",
         description=f"Run up to {MAX_WORKFLOWS} configured GeoAI workflows from YAML catalogs.",
     )
+    origins = allowed_origins if allowed_origins is not None else _cors_origins_from_env()
+    if origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
     app.state.default_catalog = str(default_catalog)
     app.state.run_store = RunStore()
     app.state.executor = ThreadPoolExecutor(max_workers=max_workers)

@@ -121,6 +121,12 @@ Start the API server:
 geoai-roads serve --host 127.0.0.1 --port 8000 --catalog config/workflows.example.yaml
 ```
 
+For browser clients such as the status board map viewer, set allowed origins with:
+
+```powershell
+$env:GEOAI_CORS_ORIGINS="http://localhost:8080,http://127.0.0.1:8080"
+```
+
 Open the interactive API UI at:
 
 ```text
@@ -162,6 +168,14 @@ External app example:
   "external_request_id": "AMS-2026-00042",
   "workflow_ids": ["roads-local"],
   "stages": ["tile", "infer", "vectorize"],
+  "map_context": {
+    "source_app": "geospatial-status-board",
+    "bbox": [-107.0, 34.0, -106.0, 35.0],
+    "map_center": [-106.5, 34.5],
+    "zoom": 8,
+    "selected_layer": "airportStatus",
+    "selected_feature_ids": ["Kirtland AFB"]
+  },
   "notes": "Submitted from upstream work order."
 }
 ```

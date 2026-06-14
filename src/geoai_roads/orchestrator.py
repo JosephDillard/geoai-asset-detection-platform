@@ -7,10 +7,6 @@ from typing import Any, Iterable
 import yaml
 
 from geoai_roads.config import RoadConfig, load_config
-from geoai_roads.inference import infer_tiles
-from geoai_roads.postgis import load_vectors_to_postgis
-from geoai_roads.tiling import extract_tiles
-from geoai_roads.vectorize import vectorize_masks
 
 MAX_WORKFLOWS = 10
 ROAD_STAGES = ("tile", "infer", "vectorize", "load-postgis")
@@ -137,6 +133,8 @@ def run_road_stage(
     postgis_if_exists: str = "append",
 ) -> StageResult:
     if stage == "tile":
+        from geoai_roads.tiling import extract_tiles
+
         count = extract_tiles(
             source=config.imagery_source,
             output_dir=config.tile_dir,
@@ -152,6 +150,8 @@ def run_road_stage(
         )
 
     if stage == "infer":
+        from geoai_roads.inference import infer_tiles
+
         count = infer_tiles(
             tile_dir=config.tile_dir,
             mask_dir=config.mask_dir,
@@ -170,6 +170,8 @@ def run_road_stage(
         )
 
     if stage == "vectorize":
+        from geoai_roads.vectorize import vectorize_masks
+
         count = vectorize_masks(
             mask_dir=config.mask_dir,
             output_path=config.vector_output,
@@ -186,6 +188,8 @@ def run_road_stage(
         )
 
     if stage == "load-postgis":
+        from geoai_roads.postgis import load_vectors_to_postgis
+
         count = load_vectors_to_postgis(
             vector_path=config.vector_output,
             database_url=config.postgis_url,
