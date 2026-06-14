@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 
 import geopandas as gpd
 import rasterio
 from rasterio.features import shapes
 from rasterio.warp import transform_bounds
+from shapely import affinity
 from shapely.geometry import MultiPolygon, Polygon, shape
 from shapely.ops import unary_union
 
@@ -24,6 +26,11 @@ def vectorize_masks(
     rectangularize: bool = False,
     rectangularize_min_area_ratio: float = 0.9,
     dissolve_overlaps: bool = False,
+    regularize: bool = False,
+    regularize_tolerance_m: float = 0,
+    regularize_angle_tolerance_degrees: float = 12,
+    regularize_min_area_ratio: float = 0.7,
+    regularize_max_area_ratio: float = 1.35,
     max_mask_coverage: float = 0,
     max_source_pixel_size_m: float = 0,
     class_name: str = "road",
@@ -102,6 +109,19 @@ def vectorize_masks(
 
     if smooth_tolerance_m > 0 and not roads.empty:
         roads["geometry"] = roads.geometry.buffer(smooth_tolerance_m).buffer(-smooth_tolerance_m)
+        roads = roads[~roads.geometry.is_empty & roads.geometry.notnull()].copy()
+
+    if regularize and not roads.empty:
+        roads["geometry"] = roads.geometry.apply(
+            lambda geometry: _regularize_geometry(
+                geometry=geometry,
+                simplify_tolerance=regularize_tolerance_m,
+                angle_tolerance_degrees=regularize_angle_tolerance_degrees,
+                min_area_ratio=regularize_min_area_ratio,
+                max_area_ratio=regularize_max_area_ratio,
+            )
+        )
+        roads["geometry"] = roads.geometry.buffer(0)
         roads = roads[~roads.geometry.is_empty & roads.geometry.notnull()].copy()
 
     roads["geometry"] = roads.geometry.apply(_as_multipolygon)
@@ -244,6 +264,137 @@ def _rectangularize_polygon(polygon: Polygon, min_area_ratio: float) -> Polygon:
     if area_ratio < min_area_ratio:
         return polygon
     return rectangle
+
+
+def _regularize_geometry(
+    geometry,
+    simplify_tolerance: float,
+    angle_tolerance_degrees: float,
+    min_area_ratio: float,
+    max_area_ratio: float,
+):
+    if geometry is None or geometry.is_empty:
+        return geometry
+    if isinstance(geometry, Polygon):
+        return _regularize_polygon(
+            geometry,
+            simplify_tolerance,
+            angle_tolerance_degrees,
+            min_area_ratio,
+            max_area_ratio,
+        )
+    polygons = [
+        _regularize_polygon(
+            polygon,
+            simplify_tolerance,
+            angle_tolerance_degrees,
+            min_area_ratio,
+            max_area_ratio,
+        )
+        for polygon in _iter_polygons(geometry)
+    ]
+    return MultiPolygon([polygon for polygon in polygons if polygon and not polygon.is_empty])
+
+
+def _regularize_polygon(
+    polygon: Polygon,
+    simplify_tolerance: float,
+    angle_tolerance_degrees: float,
+    min_area_ratio: float,
+    max_area_ratio: float,
+) -> Polygon:
+    original = polygon.buffer(0)
+    if original.is_empty or original.area <= 0:
+        return original
+
+    working = original
+    if simplify_tolerance > 0:
+        working = working.simplify(simplify_tolerance, preserve_topology=True).buffer(0)
+        if working.is_empty or working.area <= 0:
+            return original
+
+    angle = _dominant_polygon_angle(original)
+    rotated = affinity.rotate(working, -angle, origin="centroid", use_radians=False)
+    snapped = _snap_polygon_axis_edges(rotated, angle_tolerance_degrees)
+    if snapped.is_empty:
+        return working
+
+    restored = affinity.rotate(snapped, angle, origin="centroid", use_radians=False).buffer(0)
+    if restored.is_empty or restored.area <= 0:
+        return working
+
+    area_ratio = restored.area / original.area
+    if area_ratio < min_area_ratio or area_ratio > max_area_ratio:
+        return working
+    return restored
+
+
+def _dominant_polygon_angle(polygon: Polygon) -> float:
+    rectangle = polygon.minimum_rotated_rectangle
+    if not isinstance(rectangle, Polygon) or rectangle.is_empty:
+        return 0.0
+
+    coords = list(rectangle.exterior.coords)
+    longest_length = 0.0
+    longest_angle = 0.0
+    for start, end in zip(coords, coords[1:]):
+        dx = end[0] - start[0]
+        dy = end[1] - start[1]
+        length = math.hypot(dx, dy)
+        if length > longest_length:
+            longest_length = length
+            longest_angle = math.degrees(math.atan2(dy, dx))
+    return longest_angle
+
+
+def _snap_polygon_axis_edges(polygon: Polygon, angle_tolerance_degrees: float) -> Polygon:
+    exterior = _snap_ring_axis_edges(list(polygon.exterior.coords), angle_tolerance_degrees)
+    if len(exterior) < 4:
+        return polygon
+
+    interiors = []
+    for interior in polygon.interiors:
+        snapped = _snap_ring_axis_edges(list(interior.coords), angle_tolerance_degrees)
+        if len(snapped) >= 4:
+            interiors.append(snapped)
+
+    try:
+        return Polygon(exterior, interiors).buffer(0)
+    except Exception:
+        return polygon
+
+
+def _snap_ring_axis_edges(
+    coords: list[tuple[float, float]],
+    angle_tolerance_degrees: float,
+) -> list[tuple[float, float]]:
+    if len(coords) < 4:
+        return coords
+
+    tangent = math.tan(math.radians(angle_tolerance_degrees))
+    snapped = [coords[0]]
+    for x, y in coords[1:]:
+        previous_x, previous_y = snapped[-1]
+        dx = x - previous_x
+        dy = y - previous_y
+        if abs(dx) > 0 and abs(dy) <= abs(dx) * tangent:
+            y = previous_y
+        elif abs(dy) > 0 and abs(dx) <= abs(dy) * tangent:
+            x = previous_x
+        snapped.append((x, y))
+
+    snapped[-1] = snapped[0]
+    return _drop_consecutive_duplicate_coords(snapped)
+
+
+def _drop_consecutive_duplicate_coords(coords: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    result = []
+    for coord in coords:
+        if not result or coord != result[-1]:
+            result.append(coord)
+    if result and result[0] != result[-1]:
+        result.append(result[0])
+    return result
 
 
 def _write_vector(frame: gpd.GeoDataFrame, output_path: Path) -> None:

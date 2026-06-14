@@ -9,6 +9,7 @@ models:
     workflow_ids:
       - buildings-whu-taos-local
       - buildings-whu-taos-postgis
+      - buildings-whu-taos-threshold-sweep
 
   - id: road-detection
     name: Detect roads
@@ -107,5 +108,15 @@ workflows:
     enabled: true
     config: buildings.whu-taos.example.yaml
     stages: [tile, infer, vectorize, load-postgis]
+    postgis:
+      if_exists: append
+
+  - id: buildings-whu-taos-threshold-sweep
+    name: Taos, New Mexico NAIP sample threshold sweep - WHU building model
+    type: roads
+    model: building-detection
+    enabled: false
+    config: buildings.whu-taos.example.yaml
+    stages: [tile, infer, threshold-sweep]
     postgis:
       if_exists: append

@@ -9,7 +9,7 @@ import yaml
 from geoai_roads.config import RoadConfig, load_config
 
 MAX_WORKFLOWS = 10
-ROAD_STAGES = ("tile", "infer", "vectorize", "load-postgis")
+ROAD_STAGES = ("tile", "infer", "vectorize", "load-postgis", "threshold-sweep")
 DEFAULT_ROAD_STAGES = ("tile", "infer", "vectorize")
 POSTGIS_IF_EXISTS = ("fail", "replace", "append")
 DEFAULT_MODEL_DEFINITIONS: tuple[dict[str, Any], ...] = (
@@ -278,6 +278,9 @@ def run_road_stage(
             preserve_model_resolution=config.preserve_model_resolution,
             probability_dir=config.probability_dir,
             augmentations=config.inference_augmentations,
+            input_sizes=config.inference_input_sizes,
+            average_overlaps=config.average_probability_overlaps,
+            mask_cleanup=config.mask_cleanup,
             output_name=config.model_output_name,
             backend=config.model_backend,
             architecture=config.model_architecture,
@@ -310,6 +313,11 @@ def run_road_stage(
             rectangularize=config.rectangularize,
             rectangularize_min_area_ratio=config.rectangularize_min_area_ratio,
             dissolve_overlaps=config.dissolve_overlaps,
+            regularize=config.regularize,
+            regularize_tolerance_m=config.regularize_tolerance_m,
+            regularize_angle_tolerance_degrees=config.regularize_angle_tolerance_degrees,
+            regularize_min_area_ratio=config.regularize_min_area_ratio,
+            regularize_max_area_ratio=config.regularize_max_area_ratio,
             max_mask_coverage=config.max_mask_coverage,
             max_source_pixel_size_m=config.max_source_pixel_size_m,
             class_name=config.class_name,
@@ -340,6 +348,25 @@ def run_road_stage(
                 f"Loaded {count} {config.class_name} feature(s) into "
                 f"{config.postgis_schema}.{config.postgis_table}"
             ),
+        )
+
+    if stage == "threshold-sweep":
+        from geoai_roads.threshold_sweep import run_threshold_sweep
+
+        items = run_threshold_sweep(
+            config=config,
+            postgis_if_exists=postgis_if_exists,
+            job_id=job_id or workflow_id or config.raw.get("project", {}).get("name"),
+            workflow_id=workflow_id,
+        )
+        message = ", ".join(
+            f"{item['threshold']:.2f}->{item['job_id']} ({item['feature_count']})"
+            for item in items
+        )
+        return StageResult(
+            stage,
+            sum(int(item["feature_count"]) for item in items),
+            f"Loaded threshold sweep jobs: {message}",
         )
 
     raise ValueError(f"Unsupported road stage: {stage}")

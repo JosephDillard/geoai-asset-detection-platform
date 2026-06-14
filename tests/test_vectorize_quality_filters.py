@@ -4,8 +4,9 @@ import geopandas as gpd
 import numpy as np
 import rasterio
 from rasterio.transform import from_origin
+from shapely.geometry import Polygon
 
-from geoai_roads.vectorize import vectorize_masks
+from geoai_roads.vectorize import _regularize_polygon, vectorize_masks
 
 
 def _write_mask(path: Path, mask: np.ndarray, crs: str, transform) -> None:
@@ -229,3 +230,28 @@ def test_vectorize_preserves_complex_building_masks_when_rectangularizing(tmp_pa
     assert count == 1
     assert len(polygon.exterior.coords) > 5
     assert polygon.area == 27
+
+
+def test_regularize_polygon_snaps_edges_without_forcing_rectangle() -> None:
+    polygon = Polygon(
+        [
+            (0, 0),
+            (4, 0.15),
+            (4.1, 1.8),
+            (2.4, 1.9),
+            (2.2, 3.1),
+            (0.1, 3),
+            (0, 0),
+        ]
+    )
+
+    regularized = _regularize_polygon(
+        polygon,
+        simplify_tolerance=0,
+        angle_tolerance_degrees=10,
+        min_area_ratio=0.5,
+        max_area_ratio=1.5,
+    )
+
+    assert regularized.area > 0
+    assert len(regularized.exterior.coords) > 5

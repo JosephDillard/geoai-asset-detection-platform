@@ -44,6 +44,21 @@ def vectorize(config_path: str) -> None:
     _echo_stage_result(run_road_stage(config, "vectorize"))
 
 
+@main.command("threshold-sweep")
+@click.option("--config", "config_path", default="config/roads.example.yaml", show_default=True)
+@click.option(
+    "--if-exists",
+    type=click.Choice(["fail", "replace", "append"]),
+    default="append",
+    show_default=True,
+)
+@click.option("--job-id", default=None, help="Base job id written to loaded threshold jobs.")
+def threshold_sweep(config_path: str, if_exists: str, job_id: str | None) -> None:
+    """Vectorize and load multiple thresholds from saved probability rasters."""
+    config = load_config(config_path)
+    _echo_stage_result(run_road_stage(config, "threshold-sweep", if_exists, job_id=job_id))
+
+
 @main.command("load-postgis")
 @click.option("--config", "config_path", default="config/roads.example.yaml", show_default=True)
 @click.option(

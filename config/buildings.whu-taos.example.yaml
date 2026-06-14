@@ -30,10 +30,17 @@ model:
 
 inference:
   threshold: 0.35
+  threshold_sweep: [0.25, 0.30, 0.35, 0.40, 0.45]
+  input_sizes: [512, 640]
   preserve_model_resolution: true
   save_probability: true
   probability_dir: outputs/whu_taos_building_probabilities
   augmentations: [none, hflip, vflip, hvflip]
+  average_overlaps: true
+  mask_cleanup:
+    close_pixels: 1
+    fill_holes_pixels: 96
+    remove_objects_pixels: 32
   mask_dir: outputs/whu_taos_building_masks
 
 vectorization:
@@ -43,6 +50,11 @@ vectorization:
   rectangularize: false
   rectangularize_min_area_ratio: 0.98
   dissolve_overlaps: true
+  regularize: true
+  regularize_tolerance_m: 0.2
+  regularize_angle_tolerance_degrees: 12
+  regularize_min_area_ratio: 0.65
+  regularize_max_area_ratio: 1.45
   max_mask_coverage: 0.65
   max_source_pixel_size_m: 1.0
   output: outputs/whu_taos_buildings.gpkg

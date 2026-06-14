@@ -7,6 +7,8 @@ from typing import Any
 
 import yaml
 
+from geoai_roads.masking import MaskCleanupConfig
+
 
 @dataclass(frozen=True)
 class RoadConfig:
@@ -71,6 +73,18 @@ class RoadConfig:
         return int(self.raw["model"].get("input_size", self.tile_size))
 
     @property
+    def inference_input_sizes(self) -> list[int]:
+        inference = self.raw.get("inference") or {}
+        value = inference.get("input_sizes")
+        if value is None:
+            return [self.model_input_size]
+        if isinstance(value, int):
+            return [value]
+        if isinstance(value, str):
+            return [int(item.strip()) for item in value.split(",") if item.strip()]
+        return [int(item) for item in value]
+
+    @property
     def model_mean(self) -> list[float]:
         return list(self.raw["model"].get("mean", [0.0, 0.0, 0.0]))
 
@@ -86,6 +100,15 @@ class RoadConfig:
     @property
     def road_threshold(self) -> float:
         return float(self.raw["inference"].get("threshold", 0.5))
+
+    @property
+    def threshold_sweep(self) -> list[float]:
+        value = self.raw["inference"].get("threshold_sweep", [])
+        if isinstance(value, (int, float)):
+            return [float(value)]
+        if isinstance(value, str):
+            return [float(item.strip()) for item in value.split(",") if item.strip()]
+        return [float(item) for item in value]
 
     @property
     def class_name(self) -> str:
@@ -106,7 +129,7 @@ class RoadConfig:
         value = self.raw["inference"].get("probability_dir")
         if value:
             return self._resolve_path(value)
-        if self.save_probability:
+        if self.save_probability or self.average_probability_overlaps or self.mask_cleanup.enabled:
             return self.mask_dir.parent / f"{self.mask_dir.name}_probabilities"
         return None
 
@@ -122,6 +145,19 @@ class RoadConfig:
     @property
     def preserve_model_resolution(self) -> bool:
         return bool(self.raw["inference"].get("preserve_model_resolution", False))
+
+    @property
+    def average_probability_overlaps(self) -> bool:
+        return bool(self.raw["inference"].get("average_overlaps", False))
+
+    @property
+    def mask_cleanup(self) -> MaskCleanupConfig:
+        cleanup = self.raw["inference"].get("mask_cleanup") or {}
+        return MaskCleanupConfig(
+            close_pixels=int(cleanup.get("close_pixels", 0)),
+            fill_holes_pixels=int(cleanup.get("fill_holes_pixels", 0)),
+            remove_objects_pixels=int(cleanup.get("remove_objects_pixels", 0)),
+        )
 
     @property
     def vector_output(self) -> Path:
@@ -150,6 +186,26 @@ class RoadConfig:
     @property
     def dissolve_overlaps(self) -> bool:
         return bool(self.raw["vectorization"].get("dissolve_overlaps", False))
+
+    @property
+    def regularize(self) -> bool:
+        return bool(self.raw["vectorization"].get("regularize", False))
+
+    @property
+    def regularize_tolerance_m(self) -> float:
+        return float(self.raw["vectorization"].get("regularize_tolerance_m", 0))
+
+    @property
+    def regularize_angle_tolerance_degrees(self) -> float:
+        return float(self.raw["vectorization"].get("regularize_angle_tolerance_degrees", 12))
+
+    @property
+    def regularize_min_area_ratio(self) -> float:
+        return float(self.raw["vectorization"].get("regularize_min_area_ratio", 0.7))
+
+    @property
+    def regularize_max_area_ratio(self) -> float:
+        return float(self.raw["vectorization"].get("regularize_max_area_ratio", 1.35))
 
     @property
     def max_mask_coverage(self) -> float:

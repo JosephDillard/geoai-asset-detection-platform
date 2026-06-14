@@ -9,6 +9,8 @@ import rasterio
 from affine import Affine
 from rasterio.enums import Resampling
 
+from geoai_roads.masking import MaskCleanupConfig, threshold_probability_rasters
+
 MODEL_BACKENDS = {"onnx", "keras", "pytorch"}
 TTA_AUGMENTATIONS = {"none", "hflip", "vflip", "hvflip"}
 
@@ -116,6 +118,9 @@ def infer_tiles(
     preserve_model_resolution: bool = False,
     probability_dir: Path | None = None,
     augmentations: Iterable[str] | None = None,
+    input_sizes: Iterable[int] | None = None,
+    average_overlaps: bool = False,
+    mask_cleanup: MaskCleanupConfig | None = None,
     output_name: str | None = None,
     backend: str = "onnx",
     architecture: str = "unet",
@@ -126,18 +131,23 @@ def infer_tiles(
 ) -> int:
     backend = _normalize_backend(backend, model_path)
     augmentations = _normalize_augmentations(augmentations)
+    input_sizes = _normalize_input_sizes(input_size, input_sizes)
+    mask_cleanup = mask_cleanup or MaskCleanupConfig()
     tile_paths = sorted(tile_dir.glob("*.tif"))
 
     _prepare_mask_dir(mask_dir)
     if probability_dir:
         _prepare_probability_dir(probability_dir)
+    elif average_overlaps or mask_cleanup.enabled:
+        raise ValueError("Probability rasters must be enabled for overlap averaging or mask cleanup.")
+
     if backend == "onnx":
-        return _infer_tiles_onnx(
+        count = _infer_tiles_onnx(
             tile_paths=tile_paths,
             mask_dir=mask_dir,
             probability_dir=probability_dir,
             model_path=model_path,
-            input_size=input_size,
+            input_sizes=input_sizes,
             mean=mean,
             std=std,
             threshold=threshold,
@@ -146,13 +156,13 @@ def infer_tiles(
             output_name=output_name,
             class_name=class_name,
         )
-    if backend == "keras":
-        return _infer_tiles_keras(
+    elif backend == "keras":
+        count = _infer_tiles_keras(
             tile_paths=tile_paths,
             mask_dir=mask_dir,
             probability_dir=probability_dir,
             model_path=model_path,
-            input_size=input_size,
+            input_sizes=input_sizes,
             mean=mean,
             std=std,
             threshold=threshold,
@@ -161,13 +171,13 @@ def infer_tiles(
             output_name=output_name,
             class_name=class_name,
         )
-    if backend == "pytorch":
-        return _infer_tiles_pytorch(
+    elif backend == "pytorch":
+        count = _infer_tiles_pytorch(
             tile_paths=tile_paths,
             mask_dir=mask_dir,
             probability_dir=probability_dir,
             model_path=model_path,
-            input_size=input_size,
+            input_sizes=input_sizes,
             mean=mean,
             std=std,
             threshold=threshold,
@@ -179,7 +189,20 @@ def infer_tiles(
             num_classes=num_classes,
             class_name=class_name,
         )
-    raise ValueError(f"Unsupported road segmentation model backend: {backend}")
+    else:
+        raise ValueError(f"Unsupported road segmentation model backend: {backend}")
+
+    if probability_dir and (average_overlaps or mask_cleanup.enabled):
+        return threshold_probability_rasters(
+            probability_dir=probability_dir,
+            mask_dir=mask_dir,
+            threshold=threshold,
+            class_name=class_name,
+            average_overlaps=average_overlaps,
+            cleanup=mask_cleanup,
+        )
+
+    return count
 
 
 def _prepare_mask_dir(mask_dir: Path) -> None:
@@ -201,7 +224,7 @@ def _infer_tiles_onnx(
     mask_dir: Path,
     probability_dir: Path | None,
     model_path: Path,
-    input_size: int,
+    input_sizes: tuple[int, ...],
     mean: list[float],
     std: list[float],
     threshold: float,
@@ -214,14 +237,17 @@ def _infer_tiles_onnx(
     input_name = session.get_inputs()[0].name
 
     for tile_path in tile_paths:
-        input_tensor = preprocess_tile(tile_path, input_size, mean, std)
-        probability = _predict_probability_with_tta(
-            input_tensor=input_tensor,
+        probability = _predict_tile_probability(
+            tile_path=tile_path,
+            input_sizes=input_sizes,
+            preprocess=preprocess_tile,
             predict=lambda tensor: session.run(
                 [output_name] if output_name else None,
                 {input_name: tensor},
             )[0],
             layout="nchw",
+            mean=mean,
+            std=std,
             augmentations=augmentations,
         )
         _write_mask(
@@ -242,7 +268,7 @@ def _infer_tiles_keras(
     mask_dir: Path,
     probability_dir: Path | None,
     model_path: Path,
-    input_size: int,
+    input_sizes: tuple[int, ...],
     mean: list[float],
     std: list[float],
     threshold: float,
@@ -253,11 +279,14 @@ def _infer_tiles_keras(
 ) -> int:
     model = _load_keras_model(model_path)
     for tile_path in tile_paths:
-        input_tensor = preprocess_tile_keras(tile_path, input_size, mean, std)
-        probability = _predict_probability_with_tta(
-            input_tensor=input_tensor,
+        probability = _predict_tile_probability(
+            tile_path=tile_path,
+            input_sizes=input_sizes,
+            preprocess=preprocess_tile_keras,
             predict=lambda tensor: _select_model_output(model.predict(tensor, verbose=0), output_name),
             layout="nhwc",
+            mean=mean,
+            std=std,
             augmentations=augmentations,
         )
         _write_mask(
@@ -278,7 +307,7 @@ def _infer_tiles_pytorch(
     mask_dir: Path,
     probability_dir: Path | None,
     model_path: Path,
-    input_size: int,
+    input_sizes: tuple[int, ...],
     mean: list[float],
     std: list[float],
     threshold: float,
@@ -299,11 +328,14 @@ def _infer_tiles_pytorch(
     )
 
     for tile_path in tile_paths:
-        input_tensor = preprocess_tile(tile_path, input_size, mean, std)
-        probability = _predict_probability_with_tta(
-            input_tensor=input_tensor,
+        probability = _predict_tile_probability(
+            tile_path=tile_path,
+            input_sizes=input_sizes,
+            preprocess=preprocess_tile,
             predict=lambda tensor: _predict_pytorch_probability(torch, model, device, tensor),
             layout="nchw",
+            mean=mean,
+            std=std,
             augmentations=augmentations,
         )
         _write_mask(
@@ -323,6 +355,35 @@ def _predict_pytorch_probability(torch: Any, model: Any, device: Any, input_tens
     with torch.no_grad():
         output = model(torch.from_numpy(np.ascontiguousarray(input_tensor)).to(device))
     return output.detach().cpu().numpy()
+
+
+def _predict_tile_probability(
+    tile_path: Path,
+    input_sizes: tuple[int, ...],
+    preprocess: Any,
+    predict: Any,
+    layout: str,
+    mean: list[float],
+    std: list[float],
+    augmentations: Iterable[str],
+) -> np.ndarray:
+    probabilities = []
+    target_shape = None
+    for input_size in sorted(input_sizes, reverse=True):
+        input_tensor = preprocess(tile_path, input_size, mean, std)
+        probability = _predict_probability_with_tta(
+            input_tensor=input_tensor,
+            predict=predict,
+            layout=layout,
+            augmentations=augmentations,
+        )
+        if target_shape is None:
+            target_shape = probability.shape
+        elif probability.shape != target_shape:
+            probability = _resize_probability(probability, target_shape)
+        probabilities.append(probability)
+
+    return np.mean(probabilities, axis=0).astype("float32")
 
 
 def _predict_probability_with_tta(
@@ -351,6 +412,16 @@ def _normalize_augmentations(augmentations: Iterable[str] | None) -> tuple[str, 
         raise ValueError(f"Unsupported inference augmentation(s): {', '.join(invalid)}. Expected: {expected}")
 
     return normalized
+
+
+def _normalize_input_sizes(input_size: int, input_sizes: Iterable[int] | None) -> tuple[int, ...]:
+    values = tuple(int(value) for value in (input_sizes or (input_size,)))
+    if not values:
+        values = (input_size,)
+    invalid = [value for value in values if value <= 0]
+    if invalid:
+        raise ValueError("Model input sizes must be positive integers.")
+    return tuple(dict.fromkeys(values))
 
 
 def _augment_input(input_tensor: np.ndarray, augmentation: str, layout: str) -> np.ndarray:
@@ -543,6 +614,24 @@ def _resize_to_tile(probability: np.ndarray, height: int, width: int) -> np.ndar
     row_idx = np.linspace(0, probability.shape[0] - 1, height).round().astype(int)
     col_idx = np.linspace(0, probability.shape[1] - 1, width).round().astype(int)
     return probability[row_idx][:, col_idx]
+
+
+def _resize_probability(probability: np.ndarray, target_shape: tuple[int, int]) -> np.ndarray:
+    if probability.shape == target_shape:
+        return probability.astype("float32")
+
+    source_height, source_width = probability.shape
+    target_height, target_width = target_shape
+    source_x = np.arange(source_width, dtype="float32")
+    source_y = np.arange(source_height, dtype="float32")
+    target_x = np.linspace(0, source_width - 1, target_width, dtype="float32")
+    target_y = np.linspace(0, source_height - 1, target_height, dtype="float32")
+
+    rows = np.vstack([np.interp(target_x, source_x, row) for row in probability])
+    resized = np.vstack(
+        [np.interp(target_y, source_y, rows[:, column]) for column in range(target_width)]
+    ).T
+    return resized.astype("float32")
 
 
 def _scaled_transform(transform: Affine, tile_width: int, tile_height: int, probability: np.ndarray) -> Affine:

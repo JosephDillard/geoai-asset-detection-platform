@@ -69,6 +69,14 @@ def test_inference_probability_config_defaults_to_sibling_dir() -> None:
                 "mask_dir": "outputs/building_masks",
                 "save_probability": True,
                 "augmentations": "none,hflip,vflip,hvflip",
+                "input_sizes": "512,640",
+                "threshold_sweep": [0.25, 0.35],
+                "average_overlaps": True,
+                "mask_cleanup": {
+                    "close_pixels": 1,
+                    "fill_holes_pixels": 20,
+                    "remove_objects_pixels": 5,
+                },
             },
         },
         path=Path("config/test.yaml").resolve(),
@@ -76,6 +84,12 @@ def test_inference_probability_config_defaults_to_sibling_dir() -> None:
 
     assert config.probability_dir == config.mask_dir.parent / "building_masks_probabilities"
     assert config.inference_augmentations == ["none", "hflip", "vflip", "hvflip"]
+    assert config.inference_input_sizes == [512, 640]
+    assert config.threshold_sweep == [0.25, 0.35]
+    assert config.average_probability_overlaps is True
+    assert config.mask_cleanup.close_pixels == 1
+    assert config.mask_cleanup.fill_holes_pixels == 20
+    assert config.mask_cleanup.remove_objects_pixels == 5
 
 
 def test_predict_probability_with_tta_inverts_flips() -> None:

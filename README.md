@@ -234,6 +234,10 @@ Copy `config/roads.example.yaml` to a local config file and update:
 - `project.output_crs`: CRS written to the final vector output; the example uses
   `EPSG:4326` for GeoServer WFS and web maps
 - `inference.threshold`: road probability cutoff, commonly `0.4` to `0.6`
+- `inference.threshold_sweep`: optional list of thresholds to vectorize and load
+  from saved probability rasters without rerunning the model
+- `inference.input_sizes`: optional multi-scale model input sizes such as
+  `[512, 640]`; probabilities are resized to the largest output and averaged
 - `inference.preserve_model_resolution`: write masks at model-output resolution
   when it is higher than the source tile; useful with smaller source chips to reduce
   blocky building footprints
@@ -243,6 +247,12 @@ Copy `config/roads.example.yaml` to a local config file and update:
 - `inference.augmentations`: optional test-time augmentation list such as
   `[none, hflip, vflip, hvflip]`; predictions are flipped back and averaged before
   thresholding
+- `inference.average_overlaps`: average overlapping probability pixels from
+  overlapping tiles before thresholding, reducing tile-edge artifacts and duplicate
+  polygons
+- `inference.mask_cleanup`: optional raster cleanup controls before polygonizing;
+  `close_pixels` bridges tiny gaps, `fill_holes_pixels` fills small holes, and
+  `remove_objects_pixels` removes tiny connected components
 - `vectorization.min_area_m2`: remove tiny false-positive fragments
 - `vectorization.smooth_tolerance_m`: optional geometry smoothing in projected meters
   to soften blocky raster-mask edges before loading into GIS
@@ -252,6 +262,9 @@ Copy `config/roads.example.yaml` to a local config file and update:
   ratio required before rectangularization is applied
 - `vectorization.dissolve_overlaps`: merge overlapping detections from overlapping
   tiles and then explode them back to separate polygon features
+- `vectorization.regularize`: gently snap near-horizontal/vertical building edges
+  to the footprint's dominant orientation while rejecting changes with excessive
+  area drift
 - `vectorization.max_source_pixel_size_m`: skip masks whose source pixel size is too
   coarse for road-surface extraction
 - `vectorization.max_mask_coverage`: skip a tile when an implausibly large fraction
