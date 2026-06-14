@@ -25,15 +25,18 @@ flowchart TD
 - Define and run up to 10 configured GeoAI workflows from one catalog.
 - Expose workflow execution through a REST API with an interactive `/docs` UI.
 
-## Related Documentation
+## Repository Map
 
-These links assume this repo sits next to the status board repo in the same parent
-folder.
+This repo provides the GeoAI workflow API and road-detection pipeline. The companion
+status-board repo provides the Grails application, MapLibre map viewer, GeoServer
+configuration, PostGIS stack, and geospatial architecture notes that consume GeoAI
+outputs.
 
-- [Geospatial Status Board README](../geospatial-status-board/README.md) - Grails,
-  MapLibre, GeoServer, and PostGIS status-board app.
-- [Geospatial Status Board Architecture](../geospatial-status-board/docs/geospatial-architecture.md)
-  - map, GeoServer, PostGIS, and GeoAI integration notes.
+- [GeoAI Asset Detection Platform repo](https://github.com/JosephDillard/geoai-asset-detection-platform)
+- [GeoAI Asset Detection Platform README](https://github.com/JosephDillard/geoai-asset-detection-platform/blob/main/README.md)
+- [Geospatial Status Board repo](https://github.com/JosephDillard/geospatial-status-board)
+- [Geospatial Status Board README](https://github.com/JosephDillard/geospatial-status-board/blob/master/README.md)
+- [Geospatial Status Board Architecture](https://github.com/JosephDillard/geospatial-status-board/blob/master/docs/geospatial-architecture.md)
 
 ## Suggested Model Path
 
