@@ -24,7 +24,7 @@ models:
 
 workflows:
   - id: roads-local
-    name: Road detection - local imagery
+    name: Demo road detection - synthetic COG
     type: roads
     model: road-detection
     enabled: true
@@ -32,17 +32,17 @@ workflows:
     stages: [tile, infer, vectorize]
 
   - id: roads-local-postgis
-    name: Road detection - local imagery to PostGIS
+    name: Demo road detection - synthetic COG to PostGIS
     type: roads
     model: road-detection
     enabled: false
     config: roads.example.yaml
     stages: [tile, infer, vectorize, load-postgis]
     postgis:
-      if_exists: replace
+      if_exists: append
 
   - id: roads-new-mexico-local
-    name: Road detection - New Mexico NAIP sample
+    name: New Mexico NAIP sample - demo model
     type: roads
     model: road-detection
     enabled: false
@@ -50,11 +50,11 @@ workflows:
     stages: [tile, infer, vectorize]
 
   - id: roads-new-mexico-postgis
-    name: Road detection - New Mexico NAIP sample to PostGIS
+    name: New Mexico NAIP sample to PostGIS - demo model
     type: roads
     model: road-detection
     enabled: false
     config: roads.new-mexico.example.yaml
     stages: [tile, infer, vectorize, load-postgis]
     postgis:
-      if_exists: replace
+      if_exists: append

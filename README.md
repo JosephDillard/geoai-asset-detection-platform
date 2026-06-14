@@ -81,6 +81,10 @@ The generated files are written to ignored local paths:
 The demo model is intentionally simple and only proves the pipeline mechanics. Replace
 it with a trained segmentation model before using detections for real analysis.
 
+The generated demo COG uses projected meter-scale pixels. If you created demo assets
+before this change and see very wide road polygons from `example-cog.tif`, rerun
+`python scripts/create_demo_assets.py` so the local demo raster is regenerated.
+
 ### Fetch Real New Mexico Imagery
 
 For more realistic pipeline testing, fetch a small 2022 NAIP COG sample near
@@ -134,6 +138,10 @@ Copy `config/roads.example.yaml` to a local config file and update:
 - `vectorization.min_area_m2`: remove tiny false-positive fragments
 - `vectorization.smooth_tolerance_m`: optional geometry smoothing in projected meters
   to soften blocky raster-mask edges before loading into GIS
+- `vectorization.max_source_pixel_size_m`: skip masks whose source pixel size is too
+  coarse for road-surface extraction
+- `vectorization.max_mask_coverage`: skip a tile when an implausibly large fraction
+  of the mask is classified as road
 
 ## Run
 
@@ -285,5 +293,8 @@ Open `outputs/roads.gpkg` in QGIS to inspect detections. For web or ArcGIS expor
 - Use segmentation instead of YOLO boxes for the main road extraction.
 - Use overlap during tiling so roads crossing tile boundaries are less likely to break.
 - Tune the threshold and minimum polygon area per imagery source.
+- Treat the bundled ONNX model as a mechanics-only demo. On real NAIP imagery it can
+  classify bright non-road surfaces as broad road blobs, so keep the quality filters
+  enabled until a trained road model is supplied.
 - For production centerlines, add a thinning/skeletonization step after mask generation,
   then snap and clean the resulting network in PostGIS or QGIS.

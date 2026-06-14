@@ -30,7 +30,11 @@ inference:
 vectorization:
   min_area_m2: 25
   simplify_tolerance_m: 0.5
-  smooth_tolerance_m: 1.5
+  smooth_tolerance_m: 0.5
+  # The bundled ONNX is a mechanics-only demo model. Skip implausible tile-wide
+  # detections instead of publishing broad false-positive blobs to PostGIS.
+  max_source_pixel_size_m: 2
+  max_mask_coverage: 0.20
   output: outputs/new_mexico_roads.gpkg
 
 postgis:

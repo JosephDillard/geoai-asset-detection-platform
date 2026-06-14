@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import geopandas as gpd
 import rasterio
 from rasterio.features import shapes
+from rasterio.warp import transform_bounds
 from shapely.geometry import MultiPolygon, Polygon, shape
+
+LOGGER = logging.getLogger(__name__)
 
 
 def vectorize_masks(
@@ -16,12 +20,19 @@ def vectorize_masks(
     min_area_m2: float,
     simplify_tolerance_m: float,
     smooth_tolerance_m: float = 0,
+    max_mask_coverage: float = 0,
+    max_source_pixel_size_m: float = 0,
 ) -> int:
     records = []
 
     for mask_path in sorted(mask_dir.glob("*.tif")):
         with rasterio.open(mask_path) as dataset:
             mask = dataset.read(1)
+            if _skip_for_pixel_size(mask_path, dataset, processing_crs, max_source_pixel_size_m):
+                continue
+            if _skip_for_mask_coverage(mask_path, mask, max_mask_coverage):
+                continue
+
             source_tile = dataset.tags().get("source_tile", mask_path.name)
 
             for geometry, value in shapes(mask, mask=mask == 1, transform=dataset.transform):
@@ -81,6 +92,67 @@ def vectorize_masks(
     roads = roads.to_crs(output_crs)
     _write_vector(roads, output_path)
     return len(roads)
+
+
+def _skip_for_pixel_size(
+    mask_path: Path,
+    dataset: rasterio.io.DatasetReader,
+    processing_crs: str,
+    max_source_pixel_size_m: float,
+) -> bool:
+    if max_source_pixel_size_m <= 0:
+        return False
+    if not dataset.crs:
+        LOGGER.warning("Skipping %s because it has no CRS.", mask_path.name)
+        return True
+
+    pixel_size_m = _pixel_size_in_processing_crs(dataset, processing_crs)
+    if pixel_size_m <= max_source_pixel_size_m:
+        return False
+
+    LOGGER.warning(
+        "Skipping %s because source pixel size %.2fm exceeds %.2fm.",
+        mask_path.name,
+        pixel_size_m,
+        max_source_pixel_size_m,
+    )
+    return True
+
+
+def _skip_for_mask_coverage(
+    mask_path: Path,
+    mask,
+    max_mask_coverage: float,
+) -> bool:
+    if max_mask_coverage <= 0:
+        return False
+
+    coverage = float((mask == 1).sum()) / float(mask.size) if mask.size else 0.0
+    if coverage <= max_mask_coverage:
+        return False
+
+    LOGGER.warning(
+        "Skipping %s because road-mask coverage %.1f%% exceeds %.1f%%.",
+        mask_path.name,
+        coverage * 100.0,
+        max_mask_coverage * 100.0,
+    )
+    return True
+
+
+def _pixel_size_in_processing_crs(
+    dataset: rasterio.io.DatasetReader,
+    processing_crs: str,
+) -> float:
+    left, bottom, right, top = transform_bounds(
+        dataset.crs,
+        processing_crs,
+        *dataset.bounds,
+        densify_pts=21,
+    )
+    pixel_width = abs(right - left) / max(dataset.width, 1)
+    pixel_height = abs(top - bottom) / max(dataset.height, 1)
+    return max(pixel_width, pixel_height)
 
 
 def _as_multipolygon(geometry: Polygon | MultiPolygon) -> MultiPolygon:

@@ -41,7 +41,8 @@ def write_demo_imagery(path: Path) -> None:
 
     image[:, road_mask] = np.array([230, 230, 225], dtype="uint8")[:, None]
 
-    transform = from_origin(-106.85, 35.05, 0.001, 0.001)
+    # Use projected meter-scale pixels so demo road polygons have realistic widths.
+    transform = from_origin(353496.0, 3864754.8, 1.0, 1.0)
     with rasterio.open(
         path,
         "w",
@@ -50,7 +51,7 @@ def write_demo_imagery(path: Path) -> None:
         width=width,
         count=3,
         dtype="uint8",
-        crs="EPSG:4326",
+        crs="EPSG:26913",
         transform=transform,
         tiled=True,
         compress="deflate",

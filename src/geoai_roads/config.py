@@ -78,6 +78,14 @@ class RoadConfig:
         return float(self.raw["vectorization"].get("smooth_tolerance_m", 0))
 
     @property
+    def max_mask_coverage(self) -> float:
+        return float(self.raw["vectorization"].get("max_mask_coverage", 0))
+
+    @property
+    def max_source_pixel_size_m(self) -> float:
+        return float(self.raw["vectorization"].get("max_source_pixel_size_m", 0))
+
+    @property
     def output_crs(self) -> str:
         return str(self.raw["project"].get("output_crs", "EPSG:3857"))
 

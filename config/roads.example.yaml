@@ -31,6 +31,10 @@ vectorization:
   min_area_m2: 15
   simplify_tolerance_m: 0.5
   smooth_tolerance_m: 1.0
+  # Guardrails for accidental demo-scale output. Re-run scripts/create_demo_assets.py
+  # if an older EPSG:4326 demo COG exists locally.
+  max_source_pixel_size_m: 5
+  max_mask_coverage: 0.35
   output: outputs/roads.gpkg
 
 postgis:
