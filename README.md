@@ -84,6 +84,12 @@ Optional PostGIS:
 docker compose up -d postgis
 ```
 
+The example config defaults to the local PostGIS service from the sibling
+`geospatial-status-board` repo (`gsb:gsb@localhost:5432/geostatusboard`) so
+detected roads can be loaded and published by that app's GeoServer stack. If you
+use this repo's standalone PostGIS service instead, copy the config and point
+`postgis.url` at your local database.
+
 ## Configure
 
 Copy `config/roads.example.yaml` to a local config file and update:
@@ -91,7 +97,8 @@ Copy `config/roads.example.yaml` to a local config file and update:
 - `imagery.source`: path to your COG or GeoTIFF
 - `model.path`: path to your exported road segmentation `.onnx` model
 - `project.processing_crs`: projected CRS used for area filtering and simplification
-- `project.output_crs`: CRS written to the final vector output
+- `project.output_crs`: CRS written to the final vector output; the example uses
+  `EPSG:4326` for GeoServer WFS and web maps
 - `inference.threshold`: road probability cutoff, commonly `0.4` to `0.6`
 - `vectorization.min_area_m2`: remove tiny false-positive fragments
 
@@ -112,8 +119,11 @@ geoai-roads run --config config/roads.example.yaml
 Load into PostGIS:
 
 ```powershell
-geoai-roads load-postgis --config config/roads.example.yaml
+geoai-roads load-postgis --config config/roads.example.yaml --if-exists replace
 ```
+
+This writes `public.detected_roads` with a `geom` geometry column and the source
+CRS preserved, so GeoServer can publish it as a WFS layer for MapLibre.
 
 ## Run Multiple Workflows
 

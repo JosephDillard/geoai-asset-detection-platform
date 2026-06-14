@@ -1,7 +1,7 @@
 project:
   name: road-detection
   processing_crs: EPSG:3857
-  output_crs: EPSG:3857
+  output_crs: EPSG:4326
 
 imagery:
   # Point this at a Cloud Optimized GeoTIFF or local GeoTIFF.
@@ -33,6 +33,7 @@ vectorization:
   output: outputs/roads.gpkg
 
 postgis:
-  url: postgresql+psycopg://geoai:geoai@localhost:5432/geoai
+  # Default targets the geospatial-status-board local Docker PostGIS stack.
+  url: postgresql+psycopg://gsb:gsb@localhost:5432/geostatusboard
   schema: public
   table: detected_roads

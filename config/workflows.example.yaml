@@ -39,4 +39,4 @@ workflows:
     config: roads.example.yaml
     stages: [tile, infer, vectorize, load-postgis]
     postgis:
-      if_exists: append
+      if_exists: replace
