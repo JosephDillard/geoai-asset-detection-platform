@@ -7,7 +7,7 @@ from rasterio.coords import BoundingBox
 from rasterio.transform import from_origin
 
 from geoai_roads.config import RoadConfig
-from geoai_roads.inference import _write_mask, preprocess_tile_keras
+from geoai_roads.inference import _predict_probability_with_tta, _write_mask, preprocess_tile_keras
 
 
 def _road_config(model: dict[str, object]) -> RoadConfig:
@@ -59,6 +59,36 @@ def test_postgis_url_can_be_overridden_by_env(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("GEOAI_POSTGIS_URL", "postgresql+psycopg://gsb:gsb@postgis:5432/geostatusboard")
 
     assert config.postgis_url == "postgresql+psycopg://gsb:gsb@postgis:5432/geostatusboard"
+
+
+def test_inference_probability_config_defaults_to_sibling_dir() -> None:
+    config = RoadConfig(
+        raw={
+            "model": {"path": "models/road-segmentation.onnx"},
+            "inference": {
+                "mask_dir": "outputs/building_masks",
+                "save_probability": True,
+                "augmentations": "none,hflip,vflip,hvflip",
+            },
+        },
+        path=Path("config/test.yaml").resolve(),
+    )
+
+    assert config.probability_dir == config.mask_dir.parent / "building_masks_probabilities"
+    assert config.inference_augmentations == ["none", "hflip", "vflip", "hvflip"]
+
+
+def test_predict_probability_with_tta_inverts_flips() -> None:
+    input_tensor = np.arange(6, dtype="float32").reshape(1, 1, 2, 3) / 10.0
+
+    probability = _predict_probability_with_tta(
+        input_tensor=input_tensor,
+        predict=lambda tensor: tensor[0, 0],
+        layout="nchw",
+        augmentations=("none", "hflip", "vflip", "hvflip"),
+    )
+
+    assert np.allclose(probability, input_tensor[0, 0])
 
 
 def test_preprocess_tile_keras_returns_nhwc_float_batch(tmp_path: Path) -> None:
@@ -131,3 +161,40 @@ def test_write_mask_can_preserve_model_resolution(tmp_path: Path) -> None:
         assert mask.height == 4
         assert mask.res == (0.5, 0.5)
         assert mask.bounds == BoundingBox(left=10, bottom=18, right=12, top=20)
+
+
+def test_write_mask_can_save_probability_raster(tmp_path: Path) -> None:
+    tile_path = tmp_path / "tile.tif"
+    mask_dir = tmp_path / "masks"
+    probability_dir = tmp_path / "probabilities"
+    image = np.zeros((3, 2, 2), dtype="uint8")
+
+    with rasterio.open(
+        tile_path,
+        "w",
+        driver="GTiff",
+        height=2,
+        width=2,
+        count=3,
+        dtype="uint8",
+        crs="EPSG:26913",
+        transform=from_origin(10, 20, 1, 1),
+    ) as dataset:
+        dataset.write(image)
+
+    probability = np.array([[0.25, 0.75], [0.4, 0.9]], dtype="float32")
+    _write_mask(
+        tile_path=tile_path,
+        mask_dir=mask_dir,
+        probability=probability,
+        threshold=0.5,
+        class_name="building",
+        probability_dir=probability_dir,
+    )
+
+    with rasterio.open(mask_dir / "tile_building_mask.tif") as mask:
+        assert mask.read(1).tolist() == [[0, 1], [0, 1]]
+
+    with rasterio.open(probability_dir / "tile_building_probability.tif") as probability_raster:
+        assert probability_raster.dtypes == ("float32",)
+        assert np.allclose(probability_raster.read(1), probability)

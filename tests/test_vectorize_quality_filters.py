@@ -127,6 +127,43 @@ def test_vectorize_uses_mask_class_name_tag(tmp_path: Path) -> None:
     assert buildings.loc[0, "class_name"] == "building"
 
 
+def test_vectorize_can_dissolve_overlapping_tile_polygons(tmp_path: Path) -> None:
+    mask_dir = tmp_path / "masks"
+    output = tmp_path / "buildings.gpkg"
+    first = np.ones((4, 4), dtype="uint8")
+    second = np.ones((4, 4), dtype="uint8")
+    _write_tagged_mask(
+        mask_dir / "building_tile_1_mask.tif",
+        first,
+        "EPSG:26913",
+        from_origin(0, 4, 1, 1),
+        "building",
+    )
+    _write_tagged_mask(
+        mask_dir / "building_tile_2_mask.tif",
+        second,
+        "EPSG:26913",
+        from_origin(2, 4, 1, 1),
+        "building",
+    )
+
+    count = vectorize_masks(
+        mask_dir=mask_dir,
+        output_path=output,
+        processing_crs="EPSG:26913",
+        output_crs="EPSG:26913",
+        min_area_m2=0,
+        simplify_tolerance_m=0,
+        dissolve_overlaps=True,
+    )
+
+    buildings = gpd.read_file(output)
+    polygon = buildings.geometry.iloc[0].geoms[0]
+    assert count == 1
+    assert len(buildings) == 1
+    assert polygon.area == 24
+
+
 def test_vectorize_can_rectangularize_building_masks(tmp_path: Path) -> None:
     mask_dir = tmp_path / "masks"
     output = tmp_path / "buildings.gpkg"

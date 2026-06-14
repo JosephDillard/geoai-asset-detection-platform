@@ -8,6 +8,7 @@ import rasterio
 from rasterio.features import shapes
 from rasterio.warp import transform_bounds
 from shapely.geometry import MultiPolygon, Polygon, shape
+from shapely.ops import unary_union
 
 LOGGER = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ def vectorize_masks(
     smooth_tolerance_m: float = 0,
     rectangularize: bool = False,
     rectangularize_min_area_ratio: float = 0.9,
+    dissolve_overlaps: bool = False,
     max_mask_coverage: float = 0,
     max_source_pixel_size_m: float = 0,
     class_name: str = "road",
@@ -93,7 +95,9 @@ def vectorize_masks(
         _write_vector(empty, output_path)
         return 0
 
-    if not rectangularize:
+    if dissolve_overlaps:
+        roads = _dissolve_overlapping_polygons(roads)
+    elif not rectangularize:
         roads = roads.dissolve(by=["source_tile", "class_name"], as_index=False)
 
     if smooth_tolerance_m > 0 and not roads.empty:
@@ -174,6 +178,37 @@ def _as_multipolygon(geometry: Polygon | MultiPolygon) -> MultiPolygon:
         return MultiPolygon([geometry])
     polygons = [part for part in getattr(geometry, "geoms", []) if isinstance(part, Polygon)]
     return MultiPolygon(polygons)
+
+
+def _dissolve_overlapping_polygons(frame: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    records = []
+    for class_name, group in frame.groupby("class_name", dropna=False):
+        merged = unary_union([geometry for geometry in group.geometry if geometry and not geometry.is_empty])
+        for polygon in _iter_polygons(merged):
+            records.append(
+                {
+                    "source_tile": "merged",
+                    "class_name": class_name,
+                    "confidence": None,
+                    "geometry": polygon,
+                }
+            )
+
+    return gpd.GeoDataFrame(records, geometry="geometry", crs=frame.crs)
+
+
+def _iter_polygons(geometry) -> list[Polygon]:
+    if geometry is None or geometry.is_empty:
+        return []
+    if isinstance(geometry, Polygon):
+        return [geometry]
+    if isinstance(geometry, MultiPolygon):
+        return [polygon for polygon in geometry.geoms if not polygon.is_empty]
+    return [
+        polygon
+        for part in getattr(geometry, "geoms", [])
+        for polygon in _iter_polygons(part)
+    ]
 
 
 def _rectangularize_geometry(geometry, min_area_ratio: float):

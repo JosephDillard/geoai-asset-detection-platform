@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import numpy as np
 import onnxruntime as ort
@@ -10,6 +10,7 @@ from affine import Affine
 from rasterio.enums import Resampling
 
 MODEL_BACKENDS = {"onnx", "keras", "pytorch"}
+TTA_AUGMENTATIONS = {"none", "hflip", "vflip", "hvflip"}
 
 
 def _to_float_rgb(image: np.ndarray) -> np.ndarray:
@@ -113,6 +114,8 @@ def infer_tiles(
     std: list[float],
     threshold: float,
     preserve_model_resolution: bool = False,
+    probability_dir: Path | None = None,
+    augmentations: Iterable[str] | None = None,
     output_name: str | None = None,
     backend: str = "onnx",
     architecture: str = "unet",
@@ -122,19 +125,24 @@ def infer_tiles(
     class_name: str = "road",
 ) -> int:
     backend = _normalize_backend(backend, model_path)
+    augmentations = _normalize_augmentations(augmentations)
     tile_paths = sorted(tile_dir.glob("*.tif"))
 
     _prepare_mask_dir(mask_dir)
+    if probability_dir:
+        _prepare_probability_dir(probability_dir)
     if backend == "onnx":
         return _infer_tiles_onnx(
             tile_paths=tile_paths,
             mask_dir=mask_dir,
+            probability_dir=probability_dir,
             model_path=model_path,
             input_size=input_size,
             mean=mean,
             std=std,
             threshold=threshold,
             preserve_model_resolution=preserve_model_resolution,
+            augmentations=augmentations,
             output_name=output_name,
             class_name=class_name,
         )
@@ -142,12 +150,14 @@ def infer_tiles(
         return _infer_tiles_keras(
             tile_paths=tile_paths,
             mask_dir=mask_dir,
+            probability_dir=probability_dir,
             model_path=model_path,
             input_size=input_size,
             mean=mean,
             std=std,
             threshold=threshold,
             preserve_model_resolution=preserve_model_resolution,
+            augmentations=augmentations,
             output_name=output_name,
             class_name=class_name,
         )
@@ -155,12 +165,14 @@ def infer_tiles(
         return _infer_tiles_pytorch(
             tile_paths=tile_paths,
             mask_dir=mask_dir,
+            probability_dir=probability_dir,
             model_path=model_path,
             input_size=input_size,
             mean=mean,
             std=std,
             threshold=threshold,
             preserve_model_resolution=preserve_model_resolution,
+            augmentations=augmentations,
             architecture=architecture,
             encoder_name=encoder_name,
             num_channels=num_channels,
@@ -177,15 +189,24 @@ def _prepare_mask_dir(mask_dir: Path) -> None:
             mask_path.unlink()
 
 
+def _prepare_probability_dir(probability_dir: Path) -> None:
+    probability_dir.mkdir(parents=True, exist_ok=True)
+    for probability_path in probability_dir.glob("*_probability.tif"):
+        if probability_path.is_file():
+            probability_path.unlink()
+
+
 def _infer_tiles_onnx(
     tile_paths: list[Path],
     mask_dir: Path,
+    probability_dir: Path | None,
     model_path: Path,
     input_size: int,
     mean: list[float],
     std: list[float],
     threshold: float,
     preserve_model_resolution: bool = False,
+    augmentations: tuple[str, ...] = ("none",),
     output_name: str | None = None,
     class_name: str = "road",
 ) -> int:
@@ -194,9 +215,24 @@ def _infer_tiles_onnx(
 
     for tile_path in tile_paths:
         input_tensor = preprocess_tile(tile_path, input_size, mean, std)
-        outputs = session.run([output_name] if output_name else None, {input_name: input_tensor})
-        probability = road_probability(outputs[0])
-        _write_mask(tile_path, mask_dir, probability, threshold, class_name, preserve_model_resolution)
+        probability = _predict_probability_with_tta(
+            input_tensor=input_tensor,
+            predict=lambda tensor: session.run(
+                [output_name] if output_name else None,
+                {input_name: tensor},
+            )[0],
+            layout="nchw",
+            augmentations=augmentations,
+        )
+        _write_mask(
+            tile_path,
+            mask_dir,
+            probability,
+            threshold,
+            class_name,
+            preserve_model_resolution,
+            probability_dir,
+        )
 
     return len(tile_paths)
 
@@ -204,21 +240,35 @@ def _infer_tiles_onnx(
 def _infer_tiles_keras(
     tile_paths: list[Path],
     mask_dir: Path,
+    probability_dir: Path | None,
     model_path: Path,
     input_size: int,
     mean: list[float],
     std: list[float],
     threshold: float,
     preserve_model_resolution: bool = False,
+    augmentations: tuple[str, ...] = ("none",),
     output_name: str | None = None,
     class_name: str = "road",
 ) -> int:
     model = _load_keras_model(model_path)
     for tile_path in tile_paths:
         input_tensor = preprocess_tile_keras(tile_path, input_size, mean, std)
-        outputs = model.predict(input_tensor, verbose=0)
-        probability = road_probability(_select_model_output(outputs, output_name))
-        _write_mask(tile_path, mask_dir, probability, threshold, class_name, preserve_model_resolution)
+        probability = _predict_probability_with_tta(
+            input_tensor=input_tensor,
+            predict=lambda tensor: _select_model_output(model.predict(tensor, verbose=0), output_name),
+            layout="nhwc",
+            augmentations=augmentations,
+        )
+        _write_mask(
+            tile_path,
+            mask_dir,
+            probability,
+            threshold,
+            class_name,
+            preserve_model_resolution,
+            probability_dir,
+        )
 
     return len(tile_paths)
 
@@ -226,6 +276,7 @@ def _infer_tiles_keras(
 def _infer_tiles_pytorch(
     tile_paths: list[Path],
     mask_dir: Path,
+    probability_dir: Path | None,
     model_path: Path,
     input_size: int,
     mean: list[float],
@@ -237,6 +288,7 @@ def _infer_tiles_pytorch(
     num_classes: int,
     class_name: str = "road",
     preserve_model_resolution: bool = False,
+    augmentations: tuple[str, ...] = ("none",),
 ) -> int:
     torch, model, device = _load_pytorch_smp_model(
         model_path=model_path,
@@ -248,12 +300,84 @@ def _infer_tiles_pytorch(
 
     for tile_path in tile_paths:
         input_tensor = preprocess_tile(tile_path, input_size, mean, std)
-        with torch.no_grad():
-            output = model(torch.from_numpy(input_tensor).to(device))
-        probability = road_probability(output.detach().cpu().numpy())
-        _write_mask(tile_path, mask_dir, probability, threshold, class_name, preserve_model_resolution)
+        probability = _predict_probability_with_tta(
+            input_tensor=input_tensor,
+            predict=lambda tensor: _predict_pytorch_probability(torch, model, device, tensor),
+            layout="nchw",
+            augmentations=augmentations,
+        )
+        _write_mask(
+            tile_path,
+            mask_dir,
+            probability,
+            threshold,
+            class_name,
+            preserve_model_resolution,
+            probability_dir,
+        )
 
     return len(tile_paths)
+
+
+def _predict_pytorch_probability(torch: Any, model: Any, device: Any, input_tensor: np.ndarray) -> np.ndarray:
+    with torch.no_grad():
+        output = model(torch.from_numpy(np.ascontiguousarray(input_tensor)).to(device))
+    return output.detach().cpu().numpy()
+
+
+def _predict_probability_with_tta(
+    input_tensor: np.ndarray,
+    predict: Any,
+    layout: str,
+    augmentations: Iterable[str],
+) -> np.ndarray:
+    probabilities = []
+    for augmentation in augmentations:
+        augmented_tensor = _augment_input(input_tensor, augmentation, layout)
+        probability = road_probability(predict(augmented_tensor))
+        probabilities.append(_invert_probability_augmentation(probability, augmentation))
+
+    return np.mean(probabilities, axis=0).astype("float32")
+
+
+def _normalize_augmentations(augmentations: Iterable[str] | None) -> tuple[str, ...]:
+    normalized = tuple(str(item).strip().lower() for item in (augmentations or ("none",)) if str(item).strip())
+    if not normalized:
+        normalized = ("none",)
+
+    invalid = sorted(set(normalized) - TTA_AUGMENTATIONS)
+    if invalid:
+        expected = ", ".join(sorted(TTA_AUGMENTATIONS))
+        raise ValueError(f"Unsupported inference augmentation(s): {', '.join(invalid)}. Expected: {expected}")
+
+    return normalized
+
+
+def _augment_input(input_tensor: np.ndarray, augmentation: str, layout: str) -> np.ndarray:
+    if layout == "nchw":
+        vertical_axis = -2
+        horizontal_axis = -1
+    elif layout == "nhwc":
+        vertical_axis = 1
+        horizontal_axis = 2
+    else:
+        raise ValueError(f"Unsupported model input layout for augmentation: {layout}")
+
+    augmented = input_tensor
+    if augmentation in {"vflip", "hvflip"}:
+        augmented = np.flip(augmented, axis=vertical_axis)
+    if augmentation in {"hflip", "hvflip"}:
+        augmented = np.flip(augmented, axis=horizontal_axis)
+    return np.ascontiguousarray(augmented)
+
+
+def _invert_probability_augmentation(probability: np.ndarray, augmentation: str) -> np.ndarray:
+    restored = probability
+    if augmentation in {"vflip", "hvflip"}:
+        restored = np.flip(restored, axis=0)
+    if augmentation in {"hflip", "hvflip"}:
+        restored = np.flip(restored, axis=1)
+    return np.ascontiguousarray(restored)
 
 
 def _load_keras_model(model_path: Path) -> Any:
@@ -356,6 +480,7 @@ def _write_mask(
     threshold: float,
     class_name: str = "road",
     preserve_model_resolution: bool = False,
+    probability_dir: Path | None = None,
 ) -> None:
     with rasterio.open(tile_path) as tile:
         profile = tile.profile.copy()
@@ -383,6 +508,19 @@ def _write_mask(
             threshold=str(threshold),
             class_name=class_name,
         )
+
+    if probability_dir:
+        probability_profile = profile.copy()
+        probability_profile.update(dtype="float32", nodata=None)
+        probability_dir.mkdir(parents=True, exist_ok=True)
+        probability_path = probability_dir / f"{tile_path.stem}_{class_name}_probability.tif"
+        with rasterio.open(probability_path, "w", **probability_profile) as dataset:
+            dataset.write(probability.astype("float32"), 1)
+            dataset.update_tags(
+                source_tile=tile_path.name,
+                threshold=str(threshold),
+                class_name=class_name,
+            )
 
 
 def _normalize_backend(backend: str | None, model_path: Path) -> str:

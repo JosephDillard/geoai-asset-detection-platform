@@ -237,6 +237,12 @@ Copy `config/roads.example.yaml` to a local config file and update:
 - `inference.preserve_model_resolution`: write masks at model-output resolution
   when it is higher than the source tile; useful with smaller source chips to reduce
   blocky building footprints
+- `inference.save_probability` and `inference.probability_dir`: optionally save
+  float32 probability rasters before thresholding, so model confidence can be
+  inspected separately from the final binary mask
+- `inference.augmentations`: optional test-time augmentation list such as
+  `[none, hflip, vflip, hvflip]`; predictions are flipped back and averaged before
+  thresholding
 - `vectorization.min_area_m2`: remove tiny false-positive fragments
 - `vectorization.smooth_tolerance_m`: optional geometry smoothing in projected meters
   to soften blocky raster-mask edges before loading into GIS
@@ -244,6 +250,8 @@ Copy `config/roads.example.yaml` to a local config file and update:
   rotated rectangles; useful for reducing jagged WHU building footprints
 - `vectorization.rectangularize_min_area_ratio`: minimum original-area-to-rectangle-area
   ratio required before rectangularization is applied
+- `vectorization.dissolve_overlaps`: merge overlapping detections from overlapping
+  tiles and then explode them back to separate polygon features
 - `vectorization.max_source_pixel_size_m`: skip masks whose source pixel size is too
   coarse for road-surface extraction
 - `vectorization.max_mask_coverage`: skip a tile when an implausibly large fraction

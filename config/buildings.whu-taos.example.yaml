@@ -12,7 +12,7 @@ imagery:
 
 tiling:
   tile_size: 256
-  overlap: 0
+  overlap: 64
   output_dir: data/tiles/whu_taos_buildings
 
 model:
@@ -29,16 +29,20 @@ model:
   std: [1.0, 1.0, 1.0]
 
 inference:
-  threshold: 0.5
+  threshold: 0.35
   preserve_model_resolution: true
+  save_probability: true
+  probability_dir: outputs/whu_taos_building_probabilities
+  augmentations: [none, hflip, vflip, hvflip]
   mask_dir: outputs/whu_taos_building_masks
 
 vectorization:
-  min_area_m2: 15
-  simplify_tolerance_m: 0.5
+  min_area_m2: 6
+  simplify_tolerance_m: 0.1
   smooth_tolerance_m: 0
-  rectangularize: true
-  rectangularize_min_area_ratio: 0.90
+  rectangularize: false
+  rectangularize_min_area_ratio: 0.98
+  dissolve_overlaps: true
   max_mask_coverage: 0.65
   max_source_pixel_size_m: 1.0
   output: outputs/whu_taos_buildings.gpkg

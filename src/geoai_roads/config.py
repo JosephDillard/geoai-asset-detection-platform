@@ -98,6 +98,28 @@ class RoadConfig:
         return self._path("inference", "mask_dir")
 
     @property
+    def save_probability(self) -> bool:
+        return bool(self.raw["inference"].get("save_probability", False))
+
+    @property
+    def probability_dir(self) -> Path | None:
+        value = self.raw["inference"].get("probability_dir")
+        if value:
+            return self._resolve_path(value)
+        if self.save_probability:
+            return self.mask_dir.parent / f"{self.mask_dir.name}_probabilities"
+        return None
+
+    @property
+    def inference_augmentations(self) -> list[str]:
+        value = self.raw["inference"].get("augmentations", ["none"])
+        if isinstance(value, bool):
+            return ["none", "hflip", "vflip", "hvflip"] if value else ["none"]
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    @property
     def preserve_model_resolution(self) -> bool:
         return bool(self.raw["inference"].get("preserve_model_resolution", False))
 
@@ -124,6 +146,10 @@ class RoadConfig:
     @property
     def rectangularize_min_area_ratio(self) -> float:
         return float(self.raw["vectorization"].get("rectangularize_min_area_ratio", 0.9))
+
+    @property
+    def dissolve_overlaps(self) -> bool:
+        return bool(self.raw["vectorization"].get("dissolve_overlaps", False))
 
     @property
     def max_mask_coverage(self) -> float:
@@ -157,7 +183,10 @@ class RoadConfig:
         return str(self.raw["postgis"].get("table", "detected_roads"))
 
     def _path(self, section: str, key: str) -> Path:
-        value = Path(str(self.raw[section][key]))
+        return self._resolve_path(self.raw[section][key])
+
+    def _resolve_path(self, value: Any) -> Path:
+        value = Path(str(value))
         if value.is_absolute():
             return value
         return (self.path.parent.parent / value).resolve()
