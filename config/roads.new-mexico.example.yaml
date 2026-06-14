@@ -30,6 +30,7 @@ inference:
 vectorization:
   min_area_m2: 25
   simplify_tolerance_m: 0.5
+  smooth_tolerance_m: 1.5
   output: outputs/new_mexico_roads.gpkg
 
 postgis:

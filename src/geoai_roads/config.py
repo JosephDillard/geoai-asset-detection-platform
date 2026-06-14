@@ -74,6 +74,10 @@ class RoadConfig:
         return float(self.raw["vectorization"].get("simplify_tolerance_m", 0))
 
     @property
+    def smooth_tolerance_m(self) -> float:
+        return float(self.raw["vectorization"].get("smooth_tolerance_m", 0))
+
+    @property
     def output_crs(self) -> str:
         return str(self.raw["project"].get("output_crs", "EPSG:3857"))
 

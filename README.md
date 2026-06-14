@@ -129,6 +129,8 @@ Copy `config/roads.example.yaml` to a local config file and update:
   `EPSG:4326` for GeoServer WFS and web maps
 - `inference.threshold`: road probability cutoff, commonly `0.4` to `0.6`
 - `vectorization.min_area_m2`: remove tiny false-positive fragments
+- `vectorization.smooth_tolerance_m`: optional geometry smoothing in projected meters
+  to soften blocky raster-mask edges before loading into GIS
 
 ## Run
 
@@ -223,6 +225,10 @@ Useful endpoints:
 - `POST /runs`
 - `GET /runs`
 - `GET /runs/{run_id}`
+
+The local API currently runs one request at a time because the sample workflows
+share configured tile, mask, and vector output paths. Add per-run workspaces before
+raising API worker concurrency.
 
 Example run request body:
 

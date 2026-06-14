@@ -30,6 +30,7 @@ inference:
 vectorization:
   min_area_m2: 15
   simplify_tolerance_m: 0.5
+  smooth_tolerance_m: 1.0
   output: outputs/roads.gpkg
 
 postgis:

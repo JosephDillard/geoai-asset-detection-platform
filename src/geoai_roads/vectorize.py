@@ -15,6 +15,7 @@ def vectorize_masks(
     output_crs: str,
     min_area_m2: float,
     simplify_tolerance_m: float,
+    smooth_tolerance_m: float = 0,
 ) -> int:
     records = []
 
@@ -71,6 +72,11 @@ def vectorize_masks(
         return 0
 
     roads = roads.dissolve(by=["source_tile", "class_name"], as_index=False)
+
+    if smooth_tolerance_m > 0 and not roads.empty:
+        roads["geometry"] = roads.geometry.buffer(smooth_tolerance_m).buffer(-smooth_tolerance_m)
+        roads = roads[~roads.geometry.is_empty & roads.geometry.notnull()].copy()
+
     roads["geometry"] = roads.geometry.apply(_as_multipolygon)
     roads = roads.to_crs(output_crs)
     _write_vector(roads, output_path)

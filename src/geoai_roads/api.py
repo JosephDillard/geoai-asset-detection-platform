@@ -230,7 +230,7 @@ class RunStore:
 
 def create_app(
     default_catalog: str | Path = DEFAULT_CATALOG,
-    max_workers: int = 2,
+    max_workers: int = 1,
     allowed_origins: list[str] | None = None,
 ) -> FastAPI:
     app = FastAPI(

@@ -31,8 +31,6 @@ def load_vectors_to_postgis(
     with engine.begin() as connection:
         connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
         if frame.empty:
-            if if_exists == "replace":
-                connection.execute(text(f"DROP TABLE IF EXISTS {schema}.{table}"))
             return 0
 
     frame = frame.rename_geometry("geom")

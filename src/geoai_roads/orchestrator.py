@@ -280,6 +280,7 @@ def run_road_stage(
             output_crs=config.output_crs,
             min_area_m2=config.min_area_m2,
             simplify_tolerance_m=config.simplify_tolerance_m,
+            smooth_tolerance_m=config.smooth_tolerance_m,
         )
         return StageResult(
             stage,
