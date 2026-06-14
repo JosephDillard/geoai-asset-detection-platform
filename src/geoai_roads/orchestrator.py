@@ -14,9 +14,19 @@ DEFAULT_ROAD_STAGES = ("tile", "infer", "vectorize")
 POSTGIS_IF_EXISTS = ("fail", "replace", "append")
 DEFAULT_MODEL_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {
+        "id": "building-detection",
+        "name": "Detect buildings",
+        "description": "Identify building footprints from high-resolution RGB aerial imagery.",
+        "asset_type": "buildings",
+        "geometry_type": "polygon",
+        "workflow_ids": [],
+    },
+    {
         "id": "road-detection",
         "name": "Detect roads",
-        "description": "Identify road surfaces from local imagery and optionally load results to PostGIS.",
+        "description": (
+            "Identify road surfaces from local imagery and optionally load results to PostGIS."
+        ),
         "asset_type": "roads",
         "geometry_type": "polygon",
         "workflow_ids": ["roads-local", "roads-local-postgis"],
@@ -24,7 +34,9 @@ DEFAULT_MODEL_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {
         "id": "solar-panel-detection",
         "name": "Detect solar panels",
-        "description": "Identify solar panel arrays from imagery. Workflow config is not enabled yet.",
+        "description": (
+            "Identify solar panel arrays from imagery. Workflow config is not enabled yet."
+        ),
         "asset_type": "solar_panels",
         "geometry_type": "polygon",
         "workflow_ids": [],
@@ -32,7 +44,9 @@ DEFAULT_MODEL_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {
         "id": "electric-pole-detection",
         "name": "Detect electric poles",
-        "description": "Identify electric utility poles from imagery. Workflow config is not enabled yet.",
+        "description": (
+            "Identify electric utility poles from imagery. Workflow config is not enabled yet."
+        ),
         "asset_type": "electric_poles",
         "geometry_type": "point",
         "workflow_ids": [],
@@ -263,11 +277,19 @@ def run_road_stage(
             threshold=config.road_threshold,
             output_name=config.model_output_name,
             backend=config.model_backend,
+            architecture=config.model_architecture,
+            encoder_name=config.model_encoder_name,
+            num_channels=config.model_num_channels,
+            num_classes=config.model_num_classes,
+            class_name=config.class_name,
         )
         return StageResult(
             stage,
             count,
-            f"Wrote {count} road mask(s) to {config.mask_dir} using {config.model_backend}",
+            (
+                f"Wrote {count} {config.class_name} mask(s) to {config.mask_dir} "
+                f"using {config.model_backend}"
+            ),
             config.mask_dir,
         )
 
@@ -284,11 +306,12 @@ def run_road_stage(
             smooth_tolerance_m=config.smooth_tolerance_m,
             max_mask_coverage=config.max_mask_coverage,
             max_source_pixel_size_m=config.max_source_pixel_size_m,
+            class_name=config.class_name,
         )
         return StageResult(
             stage,
             count,
-            f"Wrote {count} road feature group(s) to {config.vector_output}",
+            f"Wrote {count} {config.class_name} feature group(s) to {config.vector_output}",
             config.vector_output,
         )
 
@@ -307,7 +330,10 @@ def run_road_stage(
         return StageResult(
             stage,
             count,
-            f"Loaded {count} road feature(s) into {config.postgis_schema}.{config.postgis_table}",
+            (
+                f"Loaded {count} {config.class_name} feature(s) into "
+                f"{config.postgis_schema}.{config.postgis_table}"
+            ),
         )
 
     raise ValueError(f"Unsupported road stage: {stage}")

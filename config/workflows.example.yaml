@@ -1,6 +1,15 @@
 # Define request-time model choices and up to 10 GeoAI workflows.
 # Paths are relative to this catalog file.
 models:
+  - id: building-detection
+    name: Detect buildings
+    description: Identify building footprints from high-resolution RGB aerial imagery.
+    asset_type: buildings
+    geometry_type: polygon
+    workflow_ids:
+      - buildings-whu-taos-local
+      - buildings-whu-taos-postgis
+
   - id: road-detection
     name: Detect roads
     description: Identify road surfaces from local imagery and optionally load results to PostGIS.
@@ -79,6 +88,24 @@ workflows:
     model: road-detection
     enabled: false
     config: roads.new-mexico.example.yaml
+    stages: [tile, infer, vectorize, load-postgis]
+    postgis:
+      if_exists: append
+
+  - id: buildings-whu-taos-local
+    name: Taos, New Mexico NAIP sample - WHU building model
+    type: roads
+    model: building-detection
+    enabled: false
+    config: buildings.whu-taos.example.yaml
+    stages: [tile, infer, vectorize]
+
+  - id: buildings-whu-taos-postgis
+    name: Taos, New Mexico NAIP sample to PostGIS - WHU building model
+    type: roads
+    model: building-detection
+    enabled: true
+    config: buildings.whu-taos.example.yaml
     stages: [tile, infer, vectorize, load-postgis]
     postgis:
       if_exists: append

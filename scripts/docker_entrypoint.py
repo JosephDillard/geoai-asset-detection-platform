@@ -6,11 +6,13 @@ import subprocess
 import sys
 
 HF_MODEL_PATH = Path("models/aerial-image-road-segmentation-xp.keras")
+HF_BUILDING_MODEL_PATH = Path("models/whu-building-unetplusplus-efficientnet-b4.pth")
 SAMPLE_COG_PATH = Path("data/imagery/new-mexico-naip-taos-cog.tif")
 
 
 def main() -> None:
     maybe_download_hf_model()
+    maybe_download_hf_building_model()
     maybe_fetch_sample_cog()
 
     command = sys.argv[1:] or [
@@ -39,6 +41,19 @@ def maybe_download_hf_model() -> None:
 
     print(f"HF road model missing, downloading to {model_path}", flush=True)
     run([sys.executable, "scripts/download_hf_road_model.py", "--output", str(model_path)])
+
+
+def maybe_download_hf_building_model() -> None:
+    if not enabled("GEOAI_DOWNLOAD_HF_BUILDING_MODEL", default=True):
+        return
+
+    model_path = Path(os.getenv("GEOAI_HF_BUILDING_MODEL_PATH", str(HF_BUILDING_MODEL_PATH)))
+    if model_path.exists():
+        print(f"HF building model found: {model_path}", flush=True)
+        return
+
+    print(f"HF building model missing, downloading to {model_path}", flush=True)
+    run([sys.executable, "scripts/download_hf_building_model.py", "--output", str(model_path)])
 
 
 def maybe_fetch_sample_cog() -> None:

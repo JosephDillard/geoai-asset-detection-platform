@@ -22,6 +22,7 @@ def vectorize_masks(
     smooth_tolerance_m: float = 0,
     max_mask_coverage: float = 0,
     max_source_pixel_size_m: float = 0,
+    class_name: str = "road",
 ) -> int:
     records = []
 
@@ -34,6 +35,7 @@ def vectorize_masks(
                 continue
 
             source_tile = dataset.tags().get("source_tile", mask_path.name)
+            mask_class_name = dataset.tags().get("class_name", class_name)
 
             for geometry, value in shapes(mask, mask=mask == 1, transform=dataset.transform):
                 if int(value) != 1:
@@ -41,7 +43,7 @@ def vectorize_masks(
                 records.append(
                     {
                         "source_tile": source_tile,
-                        "class_name": "road",
+                        "class_name": mask_class_name,
                         "confidence": None,
                         "geometry": shape(geometry),
                         "source_crs": dataset.crs,
@@ -132,7 +134,7 @@ def _skip_for_mask_coverage(
         return False
 
     LOGGER.warning(
-        "Skipping %s because road-mask coverage %.1f%% exceeds %.1f%%.",
+        "Skipping %s because mask coverage %.1f%% exceeds %.1f%%.",
         mask_path.name,
         coverage * 100.0,
         max_mask_coverage * 100.0,

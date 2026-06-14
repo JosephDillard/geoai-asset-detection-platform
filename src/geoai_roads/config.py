@@ -46,9 +46,25 @@ class RoadConfig:
             suffix = self.model_path.suffix.lower()
             backend = "keras" if suffix in {".keras", ".h5", ".hdf5"} else "onnx"
 
-        if backend not in {"onnx", "keras"}:
-            raise ValueError("model.backend must be one of: keras, onnx")
+        if backend not in {"onnx", "keras", "pytorch"}:
+            raise ValueError("model.backend must be one of: keras, onnx, pytorch")
         return backend
+
+    @property
+    def model_architecture(self) -> str:
+        return str(self.raw["model"].get("architecture", "unet"))
+
+    @property
+    def model_encoder_name(self) -> str:
+        return str(self.raw["model"].get("encoder_name", "resnet34"))
+
+    @property
+    def model_num_channels(self) -> int:
+        return int(self.raw["model"].get("num_channels", 3))
+
+    @property
+    def model_num_classes(self) -> int:
+        return int(self.raw["model"].get("num_classes", 2))
 
     @property
     def model_input_size(self) -> int:
@@ -70,6 +86,12 @@ class RoadConfig:
     @property
     def road_threshold(self) -> float:
         return float(self.raw["inference"].get("threshold", 0.5))
+
+    @property
+    def class_name(self) -> str:
+        asset = self.raw.get("asset") or {}
+        project = self.raw.get("project") or {}
+        return str(asset.get("class_name") or project.get("class_name") or "road")
 
     @property
     def mask_dir(self) -> Path:

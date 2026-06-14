@@ -21,6 +21,7 @@ dependencies = [
   "psycopg[binary]>=3.1",
   "fastapi>=0.111",
   "uvicorn[standard]>=0.30",
+  "huggingface-hub>=0.24",
 ]
 
 [project.optional-dependencies]
@@ -33,6 +34,10 @@ demo = [
 ]
 keras = [
   "tensorflow>=2.16; python_version < '3.13'",
+]
+pytorch = [
+  "segmentation-models-pytorch>=0.3.4",
+  "timm>=1.0",
 ]
 
 [project.scripts]

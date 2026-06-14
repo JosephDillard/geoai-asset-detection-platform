@@ -17,7 +17,8 @@ COPY pyproject.toml README.md requirements.txt ./
 COPY src ./src
 
 RUN python -m pip install --upgrade pip setuptools wheel \
-    && python -m pip install -e ".[keras]"
+    && python -m pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision \
+    && python -m pip install -e ".[keras,pytorch]"
 
 COPY config ./config
 COPY scripts ./scripts

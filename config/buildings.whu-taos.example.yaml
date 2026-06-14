@@ -1,0 +1,47 @@
+project:
+  name: building-detection-whu-taos
+  output_crs: EPSG:4326
+  processing_crs: EPSG:26913
+
+asset:
+  class_name: building
+
+imagery:
+  source: data/imagery/new-mexico-naip-taos-cog.tif
+  bands: [1, 2, 3]
+
+tiling:
+  tile_size: 512
+  overlap: 0
+  output_dir: data/tiles/whu_taos_buildings
+
+model:
+  # Apache-2.0 model:
+  # https://huggingface.co/giswqs/whu-building-unetplusplus-efficientnet-b4
+  backend: pytorch
+  architecture: unetplusplus
+  encoder_name: efficientnet-b4
+  num_channels: 3
+  num_classes: 2
+  input_size: 512
+  path: models/whu-building-unetplusplus-efficientnet-b4.pth
+  mean: [0.0, 0.0, 0.0]
+  std: [1.0, 1.0, 1.0]
+
+inference:
+  threshold: 0.5
+  mask_dir: outputs/whu_taos_building_masks
+
+vectorization:
+  min_area_m2: 15
+  simplify_tolerance_m: 0.5
+  smooth_tolerance_m: 0
+  max_mask_coverage: 0.65
+  max_source_pixel_size_m: 1.0
+  output: outputs/whu_taos_buildings.gpkg
+
+postgis:
+  # Keep the existing GeoServer-published layer/table for the fastest dev loop.
+  url: postgresql+psycopg://gsb:gsb@localhost:5432/geostatusboard
+  schema: public
+  table: detected_roads

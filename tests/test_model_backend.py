@@ -34,8 +34,14 @@ def test_model_backend_defaults_to_onnx() -> None:
     assert config.model_backend == "onnx"
 
 
-def test_model_backend_rejects_unknown_value() -> None:
+def test_model_backend_accepts_pytorch() -> None:
     config = _road_config({"path": "models/road-segmentation.onnx", "backend": "pytorch"})
+
+    assert config.model_backend == "pytorch"
+
+
+def test_model_backend_rejects_unknown_value() -> None:
+    config = _road_config({"path": "models/road-segmentation.onnx", "backend": "tensorflow-lite"})
 
     with pytest.raises(ValueError, match="model.backend"):
         config.model_backend

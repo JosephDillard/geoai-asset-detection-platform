@@ -1,17 +1,17 @@
-# GeoAI Road Detection Platform
+# GeoAI Asset Detection Platform
 
-GeoAI pipeline for detecting roads from aerial or satellite imagery and publishing the
-results as GIS-ready vector data.
+GeoAI pipeline for detecting geospatial assets from aerial or satellite imagery and
+publishing the results as GIS-ready vector data.
 
-Roads are linear networks, so this repo is set up around **semantic segmentation** rather
-than bounding-box object detection:
+The current workflows use **semantic segmentation** rather than bounding-box object
+detection:
 
 ```mermaid
 flowchart TD
     A["Imagery / COGs"] --> B["Tile extraction"]
-    B --> C["Road segmentation model (ONNX or Keras)"]
-    C --> D["Road masks"]
-    D --> E["Road polygons as GeoJSON / GeoPackage"]
+    B --> C["Segmentation model (ONNX, Keras, or PyTorch)"]
+    C --> D["Binary masks"]
+    D --> E["Asset polygons as GeoJSON / GeoPackage"]
     E --> F["PostGIS"]
     F --> G["QGIS / web map / ArcGIS-compatible export"]
 ```
@@ -19,9 +19,9 @@ flowchart TD
 ## What This Sets Up
 
 - Extract georeferenced image tiles from a GeoTIFF or Cloud Optimized GeoTIFF.
-- Run an ONNX or Keras road segmentation model against each tile.
-- Convert binary road masks into GeoJSON or GeoPackage polygons.
-- Optionally load detected roads into PostGIS.
+- Run an ONNX, Keras, or PyTorch segmentation model against each tile.
+- Convert binary masks into GeoJSON or GeoPackage polygons.
+- Optionally load detected features into PostGIS.
 - Define and run up to 10 configured GeoAI workflows from one catalog.
 - Expose workflow execution through a REST API with an interactive `/docs` UI.
 
@@ -40,7 +40,16 @@ outputs.
 
 ## Suggested Model Path
 
-Start with a road segmentation model trained on one of these label sources:
+For a working open-source smoke test, use the WHU building segmentation workflow:
+
+- Model: [`giswqs/whu-building-unetplusplus-efficientnet-b4`](https://huggingface.co/giswqs/whu-building-unetplusplus-efficientnet-b4)
+- License: Apache-2.0
+- Architecture: UNet++ with EfficientNet-B4
+- Input: 3-channel RGB, 512x512 tiles
+- Output: 2-class background/building mask
+- Local config: `config/buildings.whu-taos.example.yaml`
+
+For roads, start with a model trained on one of these label sources:
 
 - SpaceNet roads
 - Massachusetts Roads Dataset
@@ -56,14 +65,15 @@ Recommended model families:
 Export a trained model to ONNX with an RGB input shaped like `[1, 3, H, W]` and a
 single road mask output, or a two-class background/road output. The pipeline also
 supports Keras `.keras`, `.h5`, and `.hdf5` models with RGB input shaped like
-`[1, H, W, 3]`.
+`[1, H, W, 3]`, plus PyTorch segmentation-models-pytorch weights.
 
 The open-source road model currently configured for local testing is the
 MIT-licensed Hugging Face Keras model
 [`spectrewolf8/aerial-image-road-segmentation-with-U-NET-xp`](https://huggingface.co/spectrewolf8/aerial-image-road-segmentation-with-U-NET-xp).
 The model card describes a U-Net-50 road-segmentation model trained with
 256x256 patches from the Massachusetts Roads Dataset and demonstrates a `0.8`
-prediction threshold.
+prediction threshold. In Taos NAIP testing, this road model produced too few
+useful features; the WHU building model is the current practical open-source demo.
 
 ## Setup
 
@@ -111,6 +121,23 @@ python -m pip install -e ".[keras]"
 TensorFlow is intentionally optional. The default ONNX/demo workflows continue to run
 without it, and the Keras dependency is guarded so Python 3.13+ environments do not
 try to install an unsupported TensorFlow wheel.
+
+### Use The Open-Source WHU Building Model
+
+Download the WHU building model into the ignored local `models/` directory:
+
+```powershell
+python scripts\download_hf_building_model.py
+```
+
+Install the optional PyTorch backend:
+
+```powershell
+python -m pip install -e ".[pytorch]"
+```
+
+For the least-input developer path, use the Docker image from the companion status
+board repo. It installs CPU-only PyTorch and downloads the WHU model automatically.
 
 ### Fetch Real New Mexico Imagery
 
@@ -198,9 +225,10 @@ When running GeoAI directly on Windows, the YAML config still points at
 Copy `config/roads.example.yaml` to a local config file and update:
 
 - `imagery.source`: path to your COG or GeoTIFF
-- `model.path`: path to your road segmentation `.onnx` or Keras model
-- `model.backend`: `onnx` or `keras`; omitted values are inferred from the model
+- `model.path`: path to your segmentation `.onnx`, Keras, or PyTorch model
+- `model.backend`: `onnx`, `keras`, or `pytorch`; omitted values are inferred from the model
   file suffix
+- `asset.class_name`: class label written to vector outputs, such as `road` or `building`
 - `project.processing_crs`: projected CRS used for area filtering and simplification
 - `project.output_crs`: CRS written to the final vector output; the example uses
   `EPSG:4326` for GeoServer WFS and web maps
@@ -243,7 +271,7 @@ CRS preserved, so GeoServer can publish it as a WFS layer for MapLibre.
 ## Run Multiple Workflows
 
 Use `config/workflows.example.yaml` as the catalog for multiple GeoAI workflow
-definitions. Each workflow points to a road-detection config file, so you can keep
+definitions. Each workflow points to a detection config file, so you can keep
 different imagery, model, threshold, output, and PostGIS settings separate.
 
 Run every enabled workflow in the catalog:
@@ -280,6 +308,18 @@ Load the HF U-Net/Keras New Mexico sample into the status-board PostGIS layer:
 
 ```powershell
 geoai-roads run-workflows --catalog config/workflows.example.yaml --workflow roads-hf-unet-new-mexico-postgis
+```
+
+Run the WHU building model against the Taos NAIP sample:
+
+```powershell
+geoai-roads run-workflows --catalog config/workflows.example.yaml --workflow buildings-whu-taos-local
+```
+
+Load WHU building detections into the status-board PostGIS layer:
+
+```powershell
+geoai-roads run-workflows --catalog config/workflows.example.yaml --workflow buildings-whu-taos-postgis
 ```
 
 Override the stages for the selected workflows:
@@ -367,12 +407,12 @@ External app example:
 Default outputs are ignored by git:
 
 - `data/tiles/`: extracted georeferenced image chips
-- `outputs/road_masks/`: binary road masks
-- `outputs/roads.gpkg`: vectorized road polygons
+- `outputs/*_masks/`: binary segmentation masks
+- `outputs/*.gpkg`: vectorized asset polygons
 
-Open `outputs/roads.gpkg` in QGIS to inspect detections. For web or ArcGIS exports, change
-`vectorization.output` to `outputs/roads.geojson` and use an appropriate output CRS such as
-`EPSG:4326`.
+Open the configured GeoPackage output in QGIS to inspect detections. For web or
+ArcGIS exports, change `vectorization.output` to a `.geojson` path and use an
+appropriate output CRS such as `EPSG:4326`.
 
 ## Notes For Road Detection
 

@@ -8,7 +8,7 @@ import onnxruntime as ort
 import rasterio
 from rasterio.enums import Resampling
 
-MODEL_BACKENDS = {"onnx", "keras"}
+MODEL_BACKENDS = {"onnx", "keras", "pytorch"}
 
 
 def _to_float_rgb(image: np.ndarray) -> np.ndarray:
@@ -113,6 +113,11 @@ def infer_tiles(
     threshold: float,
     output_name: str | None = None,
     backend: str = "onnx",
+    architecture: str = "unet",
+    encoder_name: str = "resnet34",
+    num_channels: int = 3,
+    num_classes: int = 2,
+    class_name: str = "road",
 ) -> int:
     backend = _normalize_backend(backend, model_path)
     tile_paths = sorted(tile_dir.glob("*.tif"))
@@ -128,6 +133,7 @@ def infer_tiles(
             std=std,
             threshold=threshold,
             output_name=output_name,
+            class_name=class_name,
         )
     if backend == "keras":
         return _infer_tiles_keras(
@@ -139,13 +145,29 @@ def infer_tiles(
             std=std,
             threshold=threshold,
             output_name=output_name,
+            class_name=class_name,
+        )
+    if backend == "pytorch":
+        return _infer_tiles_pytorch(
+            tile_paths=tile_paths,
+            mask_dir=mask_dir,
+            model_path=model_path,
+            input_size=input_size,
+            mean=mean,
+            std=std,
+            threshold=threshold,
+            architecture=architecture,
+            encoder_name=encoder_name,
+            num_channels=num_channels,
+            num_classes=num_classes,
+            class_name=class_name,
         )
     raise ValueError(f"Unsupported road segmentation model backend: {backend}")
 
 
 def _prepare_mask_dir(mask_dir: Path) -> None:
     mask_dir.mkdir(parents=True, exist_ok=True)
-    for mask_path in mask_dir.glob("*_road_mask.tif"):
+    for mask_path in mask_dir.glob("*_mask.tif"):
         if mask_path.is_file():
             mask_path.unlink()
 
@@ -159,6 +181,7 @@ def _infer_tiles_onnx(
     std: list[float],
     threshold: float,
     output_name: str | None = None,
+    class_name: str = "road",
 ) -> int:
     session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
     input_name = session.get_inputs()[0].name
@@ -167,7 +190,7 @@ def _infer_tiles_onnx(
         input_tensor = preprocess_tile(tile_path, input_size, mean, std)
         outputs = session.run([output_name] if output_name else None, {input_name: input_tensor})
         probability = road_probability(outputs[0])
-        _write_mask(tile_path, mask_dir, probability, threshold)
+        _write_mask(tile_path, mask_dir, probability, threshold, class_name)
 
     return len(tile_paths)
 
@@ -181,13 +204,46 @@ def _infer_tiles_keras(
     std: list[float],
     threshold: float,
     output_name: str | None = None,
+    class_name: str = "road",
 ) -> int:
     model = _load_keras_model(model_path)
     for tile_path in tile_paths:
         input_tensor = preprocess_tile_keras(tile_path, input_size, mean, std)
         outputs = model.predict(input_tensor, verbose=0)
         probability = road_probability(_select_model_output(outputs, output_name))
-        _write_mask(tile_path, mask_dir, probability, threshold)
+        _write_mask(tile_path, mask_dir, probability, threshold, class_name)
+
+    return len(tile_paths)
+
+
+def _infer_tiles_pytorch(
+    tile_paths: list[Path],
+    mask_dir: Path,
+    model_path: Path,
+    input_size: int,
+    mean: list[float],
+    std: list[float],
+    threshold: float,
+    architecture: str,
+    encoder_name: str,
+    num_channels: int,
+    num_classes: int,
+    class_name: str = "road",
+) -> int:
+    torch, model, device = _load_pytorch_smp_model(
+        model_path=model_path,
+        architecture=architecture,
+        encoder_name=encoder_name,
+        num_channels=num_channels,
+        num_classes=num_classes,
+    )
+
+    for tile_path in tile_paths:
+        input_tensor = preprocess_tile(tile_path, input_size, mean, std)
+        with torch.no_grad():
+            output = model(torch.from_numpy(input_tensor).to(device))
+        probability = road_probability(output.detach().cpu().numpy())
+        _write_mask(tile_path, mask_dir, probability, threshold, class_name)
 
     return len(tile_paths)
 
@@ -208,6 +264,44 @@ def _load_keras_model(model_path: Path) -> Any:
         custom_objects=_keras_custom_objects(tf),
         compile=False,
     )
+
+
+def _load_pytorch_smp_model(
+    model_path: Path,
+    architecture: str,
+    encoder_name: str,
+    num_channels: int,
+    num_classes: int,
+) -> tuple[Any, Any, Any]:
+    try:
+        import torch
+        import segmentation_models_pytorch as smp
+    except Exception as exc:
+        raise RuntimeError(
+            "The PyTorch model backend requires torch and segmentation-models-pytorch. "
+            'Install with `python -m pip install -e ".[pytorch]"`, or rebuild the '
+            "GeoAI Docker image."
+        ) from exc
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = smp.create_model(
+        arch=architecture,
+        encoder_name=encoder_name,
+        encoder_weights=None,
+        in_channels=num_channels,
+        classes=num_classes,
+    )
+
+    state_dict = torch.load(model_path, map_location=device)
+    if isinstance(state_dict, dict) and "state_dict" in state_dict:
+        state_dict = state_dict["state_dict"]
+    if isinstance(state_dict, dict) and any(key.startswith("module.") for key in state_dict):
+        state_dict = {key.replace("module.", "", 1): value for key, value in state_dict.items()}
+
+    model.load_state_dict(state_dict)
+    model.to(device)
+    model.eval()
+    return torch, model, device
 
 
 def _keras_custom_objects(tf: Any) -> dict[str, Any]:
@@ -252,6 +346,7 @@ def _write_mask(
     mask_dir: Path,
     probability: np.ndarray,
     threshold: float,
+    class_name: str = "road",
 ) -> None:
     with rasterio.open(tile_path) as tile:
         probability = _resize_to_tile(probability, tile.height, tile.width)
@@ -259,10 +354,14 @@ def _write_mask(
         profile.update(driver="GTiff", count=1, dtype="uint8", nodata=0, compress="deflate")
 
     mask = (probability >= threshold).astype("uint8")
-    mask_path = mask_dir / f"{tile_path.stem}_road_mask.tif"
+    mask_path = mask_dir / f"{tile_path.stem}_{class_name}_mask.tif"
     with rasterio.open(mask_path, "w", **profile) as dataset:
         dataset.write(mask, 1)
-        dataset.update_tags(source_tile=tile_path.name, threshold=str(threshold))
+        dataset.update_tags(
+            source_tile=tile_path.name,
+            threshold=str(threshold),
+            class_name=class_name,
+        )
 
 
 def _normalize_backend(backend: str | None, model_path: Path) -> str:
