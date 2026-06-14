@@ -98,6 +98,10 @@ class RoadConfig:
         return self._path("inference", "mask_dir")
 
     @property
+    def preserve_model_resolution(self) -> bool:
+        return bool(self.raw["inference"].get("preserve_model_resolution", False))
+
+    @property
     def vector_output(self) -> Path:
         return self._path("vectorization", "output")
 
@@ -119,7 +123,7 @@ class RoadConfig:
 
     @property
     def rectangularize_min_area_ratio(self) -> float:
-        return float(self.raw["vectorization"].get("rectangularize_min_area_ratio", 0.45))
+        return float(self.raw["vectorization"].get("rectangularize_min_area_ratio", 0.9))
 
     @property
     def max_mask_coverage(self) -> float:

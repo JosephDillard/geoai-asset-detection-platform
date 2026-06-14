@@ -275,6 +275,7 @@ def run_road_stage(
             mean=config.model_mean,
             std=config.model_std,
             threshold=config.road_threshold,
+            preserve_model_resolution=config.preserve_model_resolution,
             output_name=config.model_output_name,
             backend=config.model_backend,
             architecture=config.model_architecture,

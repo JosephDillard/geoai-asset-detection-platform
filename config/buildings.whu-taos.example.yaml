@@ -11,7 +11,7 @@ imagery:
   bands: [1, 2, 3]
 
 tiling:
-  tile_size: 512
+  tile_size: 256
   overlap: 0
   output_dir: data/tiles/whu_taos_buildings
 
@@ -30,6 +30,7 @@ model:
 
 inference:
   threshold: 0.5
+  preserve_model_resolution: true
   mask_dir: outputs/whu_taos_building_masks
 
 vectorization:
@@ -37,7 +38,7 @@ vectorization:
   simplify_tolerance_m: 0.5
   smooth_tolerance_m: 0
   rectangularize: true
-  rectangularize_min_area_ratio: 0.0
+  rectangularize_min_area_ratio: 0.90
   max_mask_coverage: 0.65
   max_source_pixel_size_m: 1.0
   output: outputs/whu_taos_buildings.gpkg

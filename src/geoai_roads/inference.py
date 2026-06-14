@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 import onnxruntime as ort
 import rasterio
+from affine import Affine
 from rasterio.enums import Resampling
 
 MODEL_BACKENDS = {"onnx", "keras", "pytorch"}
@@ -111,6 +112,7 @@ def infer_tiles(
     mean: list[float],
     std: list[float],
     threshold: float,
+    preserve_model_resolution: bool = False,
     output_name: str | None = None,
     backend: str = "onnx",
     architecture: str = "unet",
@@ -132,6 +134,7 @@ def infer_tiles(
             mean=mean,
             std=std,
             threshold=threshold,
+            preserve_model_resolution=preserve_model_resolution,
             output_name=output_name,
             class_name=class_name,
         )
@@ -144,6 +147,7 @@ def infer_tiles(
             mean=mean,
             std=std,
             threshold=threshold,
+            preserve_model_resolution=preserve_model_resolution,
             output_name=output_name,
             class_name=class_name,
         )
@@ -156,6 +160,7 @@ def infer_tiles(
             mean=mean,
             std=std,
             threshold=threshold,
+            preserve_model_resolution=preserve_model_resolution,
             architecture=architecture,
             encoder_name=encoder_name,
             num_channels=num_channels,
@@ -180,6 +185,7 @@ def _infer_tiles_onnx(
     mean: list[float],
     std: list[float],
     threshold: float,
+    preserve_model_resolution: bool = False,
     output_name: str | None = None,
     class_name: str = "road",
 ) -> int:
@@ -190,7 +196,7 @@ def _infer_tiles_onnx(
         input_tensor = preprocess_tile(tile_path, input_size, mean, std)
         outputs = session.run([output_name] if output_name else None, {input_name: input_tensor})
         probability = road_probability(outputs[0])
-        _write_mask(tile_path, mask_dir, probability, threshold, class_name)
+        _write_mask(tile_path, mask_dir, probability, threshold, class_name, preserve_model_resolution)
 
     return len(tile_paths)
 
@@ -203,6 +209,7 @@ def _infer_tiles_keras(
     mean: list[float],
     std: list[float],
     threshold: float,
+    preserve_model_resolution: bool = False,
     output_name: str | None = None,
     class_name: str = "road",
 ) -> int:
@@ -211,7 +218,7 @@ def _infer_tiles_keras(
         input_tensor = preprocess_tile_keras(tile_path, input_size, mean, std)
         outputs = model.predict(input_tensor, verbose=0)
         probability = road_probability(_select_model_output(outputs, output_name))
-        _write_mask(tile_path, mask_dir, probability, threshold, class_name)
+        _write_mask(tile_path, mask_dir, probability, threshold, class_name, preserve_model_resolution)
 
     return len(tile_paths)
 
@@ -229,6 +236,7 @@ def _infer_tiles_pytorch(
     num_channels: int,
     num_classes: int,
     class_name: str = "road",
+    preserve_model_resolution: bool = False,
 ) -> int:
     torch, model, device = _load_pytorch_smp_model(
         model_path=model_path,
@@ -243,7 +251,7 @@ def _infer_tiles_pytorch(
         with torch.no_grad():
             output = model(torch.from_numpy(input_tensor).to(device))
         probability = road_probability(output.detach().cpu().numpy())
-        _write_mask(tile_path, mask_dir, probability, threshold, class_name)
+        _write_mask(tile_path, mask_dir, probability, threshold, class_name, preserve_model_resolution)
 
     return len(tile_paths)
 
@@ -347,13 +355,26 @@ def _write_mask(
     probability: np.ndarray,
     threshold: float,
     class_name: str = "road",
+    preserve_model_resolution: bool = False,
 ) -> None:
     with rasterio.open(tile_path) as tile:
-        probability = _resize_to_tile(probability, tile.height, tile.width)
         profile = tile.profile.copy()
         profile.update(driver="GTiff", count=1, dtype="uint8", nodata=0, compress="deflate")
+        if not profile.get("tiled"):
+            profile.pop("blockxsize", None)
+            profile.pop("blockysize", None)
+        if preserve_model_resolution:
+            probability = np.asarray(probability)
+            profile.update(
+                height=probability.shape[0],
+                width=probability.shape[1],
+                transform=_scaled_transform(tile.transform, tile.width, tile.height, probability),
+            )
+        else:
+            probability = _resize_to_tile(probability, tile.height, tile.width)
 
     mask = (probability >= threshold).astype("uint8")
+    mask_dir.mkdir(parents=True, exist_ok=True)
     mask_path = mask_dir / f"{tile_path.stem}_{class_name}_mask.tif"
     with rasterio.open(mask_path, "w", **profile) as dataset:
         dataset.write(mask, 1)
@@ -384,3 +405,9 @@ def _resize_to_tile(probability: np.ndarray, height: int, width: int) -> np.ndar
     row_idx = np.linspace(0, probability.shape[0] - 1, height).round().astype(int)
     col_idx = np.linspace(0, probability.shape[1] - 1, width).round().astype(int)
     return probability[row_idx][:, col_idx]
+
+
+def _scaled_transform(transform: Affine, tile_width: int, tile_height: int, probability: np.ndarray) -> Affine:
+    scale_x = tile_width / probability.shape[1]
+    scale_y = tile_height / probability.shape[0]
+    return transform * Affine.scale(scale_x, scale_y)

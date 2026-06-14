@@ -18,7 +18,7 @@ COPY src ./src
 
 RUN python -m pip install --upgrade pip setuptools wheel \
     && python -m pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision \
-    && python -m pip install -e ".[keras,pytorch]"
+    && python -m pip install -e ".[dev,keras,pytorch]"
 
 COPY config ./config
 COPY scripts ./scripts

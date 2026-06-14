@@ -21,7 +21,7 @@ def vectorize_masks(
     simplify_tolerance_m: float,
     smooth_tolerance_m: float = 0,
     rectangularize: bool = False,
-    rectangularize_min_area_ratio: float = 0.45,
+    rectangularize_min_area_ratio: float = 0.9,
     max_mask_coverage: float = 0,
     max_source_pixel_size_m: float = 0,
     class_name: str = "road",

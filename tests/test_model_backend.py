@@ -3,10 +3,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 import rasterio
+from rasterio.coords import BoundingBox
 from rasterio.transform import from_origin
 
 from geoai_roads.config import RoadConfig
-from geoai_roads.inference import preprocess_tile_keras
+from geoai_roads.inference import _write_mask, preprocess_tile_keras
 
 
 def _road_config(model: dict[str, object]) -> RoadConfig:
@@ -94,3 +95,39 @@ def test_preprocess_tile_keras_returns_nhwc_float_batch(tmp_path: Path) -> None:
     assert tensor.dtype == np.float32
     assert tensor.max() <= 1.0
     assert tensor.min() >= 0.0
+
+
+def test_write_mask_can_preserve_model_resolution(tmp_path: Path) -> None:
+    tile_path = tmp_path / "tile.tif"
+    mask_dir = tmp_path / "masks"
+    image = np.zeros((3, 2, 2), dtype="uint8")
+    transform = from_origin(10, 20, 1, 1)
+
+    with rasterio.open(
+        tile_path,
+        "w",
+        driver="GTiff",
+        height=2,
+        width=2,
+        count=3,
+        dtype="uint8",
+        crs="EPSG:26913",
+        transform=transform,
+    ) as dataset:
+        dataset.write(image)
+
+    probability = np.ones((4, 4), dtype="float32")
+    _write_mask(
+        tile_path=tile_path,
+        mask_dir=mask_dir,
+        probability=probability,
+        threshold=0.5,
+        class_name="building",
+        preserve_model_resolution=True,
+    )
+
+    with rasterio.open(mask_dir / "tile_building_mask.tif") as mask:
+        assert mask.width == 4
+        assert mask.height == 4
+        assert mask.res == (0.5, 0.5)
+        assert mask.bounds == BoundingBox(left=10, bottom=18, right=12, top=20)

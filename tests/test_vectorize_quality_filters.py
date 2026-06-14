@@ -152,6 +152,7 @@ def test_vectorize_can_rectangularize_building_masks(tmp_path: Path) -> None:
         min_area_m2=0,
         simplify_tolerance_m=0,
         rectangularize=True,
+        rectangularize_min_area_ratio=0.85,
     )
 
     buildings = gpd.read_file(output)
@@ -159,3 +160,35 @@ def test_vectorize_can_rectangularize_building_masks(tmp_path: Path) -> None:
     assert count == 1
     assert len(polygon.exterior.coords) == 5
     assert polygon.area == 36
+
+
+def test_vectorize_preserves_complex_building_masks_when_rectangularizing(tmp_path: Path) -> None:
+    mask_dir = tmp_path / "masks"
+    output = tmp_path / "buildings.gpkg"
+    mask = np.zeros((10, 10), dtype="uint8")
+    mask[2:8, 2:5] = 1
+    mask[5:8, 5:8] = 1
+    _write_tagged_mask(
+        mask_dir / "l_shaped_building_mask.tif",
+        mask,
+        "EPSG:26913",
+        from_origin(0, 10, 1, 1),
+        "building",
+    )
+
+    count = vectorize_masks(
+        mask_dir=mask_dir,
+        output_path=output,
+        processing_crs="EPSG:26913",
+        output_crs="EPSG:26913",
+        min_area_m2=0,
+        simplify_tolerance_m=0,
+        rectangularize=True,
+        rectangularize_min_area_ratio=0.9,
+    )
+
+    buildings = gpd.read_file(output)
+    polygon = buildings.geometry.iloc[0].geoms[0]
+    assert count == 1
+    assert len(polygon.exterior.coords) > 5
+    assert polygon.area == 27

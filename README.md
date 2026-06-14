@@ -115,7 +115,7 @@ python scripts\download_hf_road_model.py
 Install the optional Keras backend in a Python 3.10-3.12 environment:
 
 ```powershell
-python -m pip install -e ".[keras]"
+python -m pip install -e ".[dev,keras]"
 ```
 
 TensorFlow is intentionally optional. The default ONNX/demo workflows continue to run
@@ -133,11 +133,12 @@ python scripts\download_hf_building_model.py
 Install the optional PyTorch backend:
 
 ```powershell
-python -m pip install -e ".[pytorch]"
+python -m pip install -e ".[dev,pytorch]"
 ```
 
 For the least-input developer path, use the Docker image from the companion status
-board repo. It installs CPU-only PyTorch and downloads the WHU model automatically.
+board repo. It installs pytest/dev tooling, CPU-only PyTorch, and downloads the WHU
+model automatically.
 
 ### Fetch Real New Mexico Imagery
 
@@ -233,6 +234,9 @@ Copy `config/roads.example.yaml` to a local config file and update:
 - `project.output_crs`: CRS written to the final vector output; the example uses
   `EPSG:4326` for GeoServer WFS and web maps
 - `inference.threshold`: road probability cutoff, commonly `0.4` to `0.6`
+- `inference.preserve_model_resolution`: write masks at model-output resolution
+  when it is higher than the source tile; useful with smaller source chips to reduce
+  blocky building footprints
 - `vectorization.min_area_m2`: remove tiny false-positive fragments
 - `vectorization.smooth_tolerance_m`: optional geometry smoothing in projected meters
   to soften blocky raster-mask edges before loading into GIS
