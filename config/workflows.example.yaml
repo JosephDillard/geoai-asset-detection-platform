@@ -6,7 +6,7 @@ models:
     description: Identify road surfaces from local imagery and optionally load results to PostGIS.
     asset_type: roads
     geometry_type: polygon
-    workflow_ids: [roads-local, roads-local-postgis]
+    workflow_ids: [roads-local, roads-local-postgis, roads-new-mexico-local, roads-new-mexico-postgis]
 
   - id: solar-panel-detection
     name: Detect solar panels
@@ -37,6 +37,24 @@ workflows:
     model: road-detection
     enabled: false
     config: roads.example.yaml
+    stages: [tile, infer, vectorize, load-postgis]
+    postgis:
+      if_exists: replace
+
+  - id: roads-new-mexico-local
+    name: Road detection - New Mexico NAIP sample
+    type: roads
+    model: road-detection
+    enabled: false
+    config: roads.new-mexico.example.yaml
+    stages: [tile, infer, vectorize]
+
+  - id: roads-new-mexico-postgis
+    name: Road detection - New Mexico NAIP sample to PostGIS
+    type: roads
+    model: road-detection
+    enabled: false
+    config: roads.new-mexico.example.yaml
     stages: [tile, infer, vectorize, load-postgis]
     postgis:
       if_exists: replace

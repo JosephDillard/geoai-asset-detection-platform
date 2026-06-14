@@ -1,0 +1,39 @@
+project:
+  name: road-detection-new-mexico
+  processing_crs: EPSG:3857
+  output_crs: EPSG:4326
+
+imagery:
+  # Created by: python scripts/fetch_new_mexico_cog.py
+  source: data/imagery/new-mexico-naip-abq-cog.tif
+  bands: [1, 2, 3]
+
+tiling:
+  tile_size: 1024
+  overlap: 128
+  output_dir: data/tiles/new_mexico
+
+model:
+  # Replace with a trained road segmentation ONNX for real detections.
+  # The demo model can still exercise the pipeline mechanics against real imagery.
+  path: models/road-segmentation.onnx
+  input_size: 1024
+  mean: [0.0, 0.0, 0.0]
+  std: [1.0, 1.0, 1.0]
+  output_name:
+
+inference:
+  threshold: 0.65
+  batch_size: 1
+  mask_dir: outputs/new_mexico_road_masks
+
+vectorization:
+  min_area_m2: 25
+  simplify_tolerance_m: 0.5
+  output: outputs/new_mexico_roads.gpkg
+
+postgis:
+  # Default targets the geospatial-status-board local Docker PostGIS stack.
+  url: postgresql+psycopg://gsb:gsb@localhost:5432/geostatusboard
+  schema: public
+  table: detected_roads

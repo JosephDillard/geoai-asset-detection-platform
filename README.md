@@ -78,6 +78,24 @@ The generated files are written to ignored local paths:
 The demo model is intentionally simple and only proves the pipeline mechanics. Replace
 it with a trained segmentation model before using detections for real analysis.
 
+### Fetch Real New Mexico Imagery
+
+For more realistic pipeline testing, fetch a small 2022 NAIP COG sample near
+Albuquerque, New Mexico:
+
+```powershell
+python scripts\fetch_new_mexico_cog.py
+```
+
+This queries the Microsoft Planetary Computer NAIP STAC collection, crops a
+manageable subset from the selected public NAIP COG, and writes:
+
+- `data/imagery/new-mexico-naip-abq-cog.tif`
+
+The matching workflow config is:
+
+- `config/roads.new-mexico.example.yaml`
+
 Optional PostGIS:
 
 ```powershell
@@ -141,6 +159,18 @@ Run selected workflows:
 
 ```powershell
 geoai-roads run-workflows --catalog config/workflows.example.yaml --workflow roads-local
+```
+
+Run the New Mexico NAIP sample workflow:
+
+```powershell
+geoai-roads run-workflows --catalog config/workflows.example.yaml --workflow roads-new-mexico-local
+```
+
+Load the New Mexico NAIP sample into the status-board PostGIS layer:
+
+```powershell
+geoai-roads run-workflows --catalog config/workflows.example.yaml --workflow roads-new-mexico-postgis
 ```
 
 Override the stages for the selected workflows:
