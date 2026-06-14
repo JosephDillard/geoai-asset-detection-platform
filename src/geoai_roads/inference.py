@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import onnxruntime as ort
 import rasterio
 from rasterio.enums import Resampling
+
+MODEL_BACKENDS = {"onnx", "keras"}
 
 
 def _to_float_rgb(image: np.ndarray) -> np.ndarray:
@@ -31,6 +34,26 @@ def preprocess_tile(
     image = _to_float_rgb(image)
     mean_array = np.asarray(mean, dtype="float32")[:, None, None]
     std_array = np.asarray(std, dtype="float32")[:, None, None]
+    image = (image - mean_array) / std_array
+    return image[None, :, :, :].astype("float32")
+
+
+def preprocess_tile_keras(
+    tile_path: Path,
+    input_size: int,
+    mean: list[float],
+    std: list[float],
+) -> np.ndarray:
+    with rasterio.open(tile_path) as dataset:
+        image = dataset.read(
+            out_shape=(dataset.count, input_size, input_size),
+            resampling=Resampling.bilinear,
+        )
+
+    image = _to_float_rgb(image)
+    image = np.moveaxis(image, 0, -1)
+    mean_array = np.asarray(mean, dtype="float32")[None, None, :]
+    std_array = np.asarray(std, dtype="float32")[None, None, :]
     image = (image - mean_array) / std_array
     return image[None, :, :, :].astype("float32")
 
@@ -89,33 +112,170 @@ def infer_tiles(
     std: list[float],
     threshold: float,
     output_name: str | None = None,
+    backend: str = "onnx",
 ) -> int:
+    backend = _normalize_backend(backend, model_path)
+    tile_paths = sorted(tile_dir.glob("*.tif"))
+
+    _prepare_mask_dir(mask_dir)
+    if backend == "onnx":
+        return _infer_tiles_onnx(
+            tile_paths=tile_paths,
+            mask_dir=mask_dir,
+            model_path=model_path,
+            input_size=input_size,
+            mean=mean,
+            std=std,
+            threshold=threshold,
+            output_name=output_name,
+        )
+    if backend == "keras":
+        return _infer_tiles_keras(
+            tile_paths=tile_paths,
+            mask_dir=mask_dir,
+            model_path=model_path,
+            input_size=input_size,
+            mean=mean,
+            std=std,
+            threshold=threshold,
+            output_name=output_name,
+        )
+    raise ValueError(f"Unsupported road segmentation model backend: {backend}")
+
+
+def _prepare_mask_dir(mask_dir: Path) -> None:
     mask_dir.mkdir(parents=True, exist_ok=True)
     for mask_path in mask_dir.glob("*_road_mask.tif"):
         if mask_path.is_file():
             mask_path.unlink()
 
+
+def _infer_tiles_onnx(
+    tile_paths: list[Path],
+    mask_dir: Path,
+    model_path: Path,
+    input_size: int,
+    mean: list[float],
+    std: list[float],
+    threshold: float,
+    output_name: str | None = None,
+) -> int:
     session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
     input_name = session.get_inputs()[0].name
 
-    tile_paths = sorted(tile_dir.glob("*.tif"))
     for tile_path in tile_paths:
         input_tensor = preprocess_tile(tile_path, input_size, mean, std)
         outputs = session.run([output_name] if output_name else None, {input_name: input_tensor})
         probability = road_probability(outputs[0])
-
-        with rasterio.open(tile_path) as tile:
-            probability = _resize_to_tile(probability, tile.height, tile.width)
-            profile = tile.profile.copy()
-            profile.update(driver="GTiff", count=1, dtype="uint8", nodata=0, compress="deflate")
-
-        mask = (probability >= threshold).astype("uint8")
-        mask_path = mask_dir / f"{tile_path.stem}_road_mask.tif"
-        with rasterio.open(mask_path, "w", **profile) as dataset:
-            dataset.write(mask, 1)
-            dataset.update_tags(source_tile=tile_path.name, threshold=str(threshold))
+        _write_mask(tile_path, mask_dir, probability, threshold)
 
     return len(tile_paths)
+
+
+def _infer_tiles_keras(
+    tile_paths: list[Path],
+    mask_dir: Path,
+    model_path: Path,
+    input_size: int,
+    mean: list[float],
+    std: list[float],
+    threshold: float,
+    output_name: str | None = None,
+) -> int:
+    model = _load_keras_model(model_path)
+    for tile_path in tile_paths:
+        input_tensor = preprocess_tile_keras(tile_path, input_size, mean, std)
+        outputs = model.predict(input_tensor, verbose=0)
+        probability = road_probability(_select_model_output(outputs, output_name))
+        _write_mask(tile_path, mask_dir, probability, threshold)
+
+    return len(tile_paths)
+
+
+def _load_keras_model(model_path: Path) -> Any:
+    try:
+        import tensorflow as tf
+        from tensorflow.keras.models import load_model
+    except Exception as exc:
+        raise RuntimeError(
+            "The Keras model backend requires TensorFlow/Keras. Use a Python 3.10-3.12 "
+            'environment and install with `python -m pip install -e ".[keras]"`, or use '
+            "an ONNX model backend."
+        ) from exc
+
+    return load_model(
+        str(model_path),
+        custom_objects=_keras_custom_objects(tf),
+        compile=False,
+    )
+
+
+def _keras_custom_objects(tf: Any) -> dict[str, Any]:
+    def iou_coef(y_true: Any, y_pred: Any, smooth: float = 1e-6) -> Any:
+        intersection = tf.reduce_sum(y_true * y_pred)
+        union = tf.reduce_sum(y_true) + tf.reduce_sum(y_pred) - intersection
+        return (intersection + smooth) / (union + smooth)
+
+    def dice_coef(y_true: Any, y_pred: Any, smooth: float = 1e-6) -> Any:
+        intersection = tf.reduce_sum(y_true * y_pred)
+        total = tf.reduce_sum(y_true) + tf.reduce_sum(y_pred)
+        return (2.0 * intersection + smooth) / (total + smooth)
+
+    def soft_dice_loss(y_true: Any, y_pred: Any) -> Any:
+        return 1 - dice_coef(y_true, y_pred)
+
+    return {
+        "soft_dice_loss": soft_dice_loss,
+        "dice_coef": dice_coef,
+        "iou_coef": iou_coef,
+    }
+
+
+def _select_model_output(outputs: Any, output_name: str | None) -> np.ndarray:
+    if isinstance(outputs, dict):
+        if output_name:
+            if output_name not in outputs:
+                raise ValueError(f"Keras model did not return output named {output_name}")
+            return np.asarray(outputs[output_name])
+        return np.asarray(next(iter(outputs.values())))
+
+    if isinstance(outputs, (list, tuple)):
+        if output_name:
+            raise ValueError("Named Keras outputs must be returned as a mapping")
+        return np.asarray(outputs[0])
+
+    return np.asarray(outputs)
+
+
+def _write_mask(
+    tile_path: Path,
+    mask_dir: Path,
+    probability: np.ndarray,
+    threshold: float,
+) -> None:
+    with rasterio.open(tile_path) as tile:
+        probability = _resize_to_tile(probability, tile.height, tile.width)
+        profile = tile.profile.copy()
+        profile.update(driver="GTiff", count=1, dtype="uint8", nodata=0, compress="deflate")
+
+    mask = (probability >= threshold).astype("uint8")
+    mask_path = mask_dir / f"{tile_path.stem}_road_mask.tif"
+    with rasterio.open(mask_path, "w", **profile) as dataset:
+        dataset.write(mask, 1)
+        dataset.update_tags(source_tile=tile_path.name, threshold=str(threshold))
+
+
+def _normalize_backend(backend: str | None, model_path: Path) -> str:
+    if not backend:
+        suffix = model_path.suffix.lower()
+        backend = "keras" if suffix in {".keras", ".h5", ".hdf5"} else "onnx"
+    backend = backend.lower().strip()
+    if backend not in MODEL_BACKENDS:
+        raise ValueError(
+            f"Unsupported model backend: {backend}. Expected one of: "
+            f"{', '.join(sorted(MODEL_BACKENDS))}"
+        )
+    return backend
 
 
 def _resize_to_tile(probability: np.ndarray, height: int, width: int) -> np.ndarray:

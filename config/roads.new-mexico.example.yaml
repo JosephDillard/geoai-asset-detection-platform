@@ -1,22 +1,23 @@
 project:
-  name: road-detection-new-mexico
+  name: road-detection-new-mexico-taos
   processing_crs: EPSG:3857
   output_crs: EPSG:4326
 
 imagery:
   # Created by: python scripts/fetch_new_mexico_cog.py
-  source: data/imagery/new-mexico-naip-abq-cog.tif
+  source: data/imagery/new-mexico-naip-taos-cog.tif
   bands: [1, 2, 3]
 
 tiling:
   tile_size: 1024
   overlap: 128
-  output_dir: data/tiles/new_mexico
+  output_dir: data/tiles/new_mexico_taos
 
 model:
   # Replace with a trained road segmentation ONNX for real detections.
   # The demo model can still exercise the pipeline mechanics against real imagery.
   path: models/road-segmentation.onnx
+  backend: onnx
   input_size: 1024
   mean: [0.0, 0.0, 0.0]
   std: [1.0, 1.0, 1.0]
@@ -25,7 +26,7 @@ model:
 inference:
   threshold: 0.65
   batch_size: 1
-  mask_dir: outputs/new_mexico_road_masks
+  mask_dir: outputs/new_mexico_taos_road_masks
 
 vectorization:
   min_area_m2: 25
@@ -35,7 +36,7 @@ vectorization:
   # detections instead of publishing broad false-positive blobs to PostGIS.
   max_source_pixel_size_m: 2
   max_mask_coverage: 0.20
-  output: outputs/new_mexico_roads.gpkg
+  output: outputs/new_mexico_taos_roads.gpkg
 
 postgis:
   # Default targets the geospatial-status-board local Docker PostGIS stack.

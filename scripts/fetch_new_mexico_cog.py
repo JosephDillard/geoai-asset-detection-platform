@@ -9,12 +9,13 @@ from urllib.request import Request, urlopen
 import rasterio
 from rasterio.shutil import copy as copy_raster
 from rasterio.windows import Window
+from rasterio.warp import transform as transform_coordinates
 
 
 ROOT = Path(__file__).resolve().parents[1]
 STAC_SEARCH_URL = "https://planetarycomputer.microsoft.com/api/stac/v1/search"
-DEFAULT_BBOX = [-106.78, 34.90, -106.58, 35.10]
-DEFAULT_OUTPUT = ROOT / "data" / "imagery" / "new-mexico-naip-abq-cog.tif"
+DEFAULT_BBOX = [-105.62, 36.38, -105.54, 36.43]
+DEFAULT_OUTPUT = ROOT / "data" / "imagery" / "new-mexico-naip-taos-cog.tif"
 
 
 def main() -> None:
@@ -27,6 +28,7 @@ def main() -> None:
     write_cog_subset(
         source_href=image_href,
         output_path=output_path,
+        bbox=args.bbox,
         crop_size=args.crop_size,
         bands=args.bands,
         source_item_id=feature["id"],
@@ -95,12 +97,27 @@ def find_naip_feature(bbox: list[float], item_id: str = "") -> dict:
     if not features:
         raise RuntimeError("No NAIP COG items found for the requested New Mexico search area.")
 
-    return features[0]
+    center = ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
+    return sorted(features, key=lambda feature: feature_score(feature, center))[0]
+
+
+def feature_score(feature: dict, center: tuple[float, float]) -> tuple[int, float]:
+    item_bbox = feature.get("bbox") or []
+    if len(item_bbox) < 4:
+        return (2, float("inf"))
+
+    west, south, east, north = item_bbox
+    lon, lat = center
+    contains_center = west <= lon <= east and south <= lat <= north
+    item_center = ((west + east) / 2, (south + north) / 2)
+    distance = (item_center[0] - lon) ** 2 + (item_center[1] - lat) ** 2
+    return (0 if contains_center else 1, distance)
 
 
 def write_cog_subset(
     source_href: str,
     output_path: Path,
+    bbox: list[float],
     crop_size: int,
     bands: list[int],
     source_item_id: str,
@@ -111,8 +128,7 @@ def write_cog_subset(
     with rasterio.open(source_href) as source:
         width = min(crop_size, source.width)
         height = min(crop_size, source.height)
-        col_off = max((source.width - width) // 2, 0)
-        row_off = max((source.height - height) // 2, 0)
+        col_off, row_off = centered_window_offsets(source, bbox, width, height)
         window = Window(col_off, row_off, width, height)
         data = source.read(bands, window=window)
 
@@ -151,6 +167,32 @@ def write_cog_subset(
             blocksize=512,
             overview_resampling="nearest",
         )
+
+
+def centered_window_offsets(
+    source: rasterio.io.DatasetReader,
+    bbox: list[float],
+    width: int,
+    height: int,
+) -> tuple[int, int]:
+    west, south, east, north = bbox
+    lon = (west + east) / 2
+    lat = (south + north) / 2
+
+    if source.crs:
+        xs, ys = transform_coordinates("EPSG:4326", source.crs, [lon], [lat])
+        center_row, center_col = source.index(xs[0], ys[0])
+    else:
+        center_col = source.width // 2
+        center_row = source.height // 2
+
+    col_off = clamp(center_col - width // 2, 0, max(source.width - width, 0))
+    row_off = clamp(center_row - height // 2, 0, max(source.height - height, 0))
+    return col_off, row_off
+
+
+def clamp(value: int, minimum: int, maximum: int) -> int:
+    return max(minimum, min(value, maximum))
 
 
 if __name__ == "__main__":

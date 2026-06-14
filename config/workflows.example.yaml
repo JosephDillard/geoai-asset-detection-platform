@@ -6,7 +6,13 @@ models:
     description: Identify road surfaces from local imagery and optionally load results to PostGIS.
     asset_type: roads
     geometry_type: polygon
-    workflow_ids: [roads-local, roads-local-postgis, roads-new-mexico-local, roads-new-mexico-postgis]
+    workflow_ids:
+      - roads-local
+      - roads-local-postgis
+      - roads-hf-unet-new-mexico-local
+      - roads-hf-unet-new-mexico-postgis
+      - roads-new-mexico-local
+      - roads-new-mexico-postgis
 
   - id: solar-panel-detection
     name: Detect solar panels
@@ -42,15 +48,33 @@ workflows:
       if_exists: append
 
   - id: roads-new-mexico-local
-    name: New Mexico NAIP sample - demo model
+    name: Taos, New Mexico NAIP sample - demo model
     type: roads
     model: road-detection
     enabled: false
     config: roads.new-mexico.example.yaml
     stages: [tile, infer, vectorize]
 
+  - id: roads-hf-unet-new-mexico-local
+    name: Taos, New Mexico NAIP sample - HF U-Net/Keras
+    type: roads
+    model: road-detection
+    enabled: false
+    config: roads.hf-unet-new-mexico.example.yaml
+    stages: [tile, infer, vectorize]
+
+  - id: roads-hf-unet-new-mexico-postgis
+    name: Taos, New Mexico NAIP sample to PostGIS - HF U-Net/Keras
+    type: roads
+    model: road-detection
+    enabled: false
+    config: roads.hf-unet-new-mexico.example.yaml
+    stages: [tile, infer, vectorize, load-postgis]
+    postgis:
+      if_exists: append
+
   - id: roads-new-mexico-postgis
-    name: New Mexico NAIP sample to PostGIS - demo model
+    name: Taos, New Mexico NAIP sample to PostGIS - demo model
     type: roads
     model: road-detection
     enabled: false

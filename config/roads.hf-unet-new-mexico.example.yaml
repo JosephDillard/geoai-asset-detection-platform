@@ -1,0 +1,45 @@
+project:
+  name: road-detection-hf-unet-taos
+  processing_crs: EPSG:3857
+  output_crs: EPSG:4326
+
+imagery:
+  # Created by: python scripts/fetch_new_mexico_cog.py
+  source: data/imagery/new-mexico-naip-taos-cog.tif
+  bands: [1, 2, 3]
+
+tiling:
+  # The HF U-Net model card uses 256x256 image patches.
+  tile_size: 256
+  overlap: 64
+  output_dir: data/tiles/hf_unet_taos
+
+model:
+  # MIT-licensed Hugging Face Keras model:
+  # https://huggingface.co/spectrewolf8/aerial-image-road-segmentation-with-U-NET-xp
+  path: models/aerial-image-road-segmentation-xp.keras
+  backend: keras
+  input_size: 256
+  mean: [0.0, 0.0, 0.0]
+  std: [1.0, 1.0, 1.0]
+  output_name:
+
+inference:
+  # The model card demonstrates thresholding at 0.8.
+  threshold: 0.8
+  batch_size: 1
+  mask_dir: outputs/hf_unet_taos_road_masks
+
+vectorization:
+  min_area_m2: 20
+  simplify_tolerance_m: 0.5
+  smooth_tolerance_m: 0.5
+  max_source_pixel_size_m: 2
+  max_mask_coverage: 0.35
+  output: outputs/hf_unet_taos_roads.gpkg
+
+postgis:
+  # Default targets the geospatial-status-board local Docker PostGIS stack.
+  url: postgresql+psycopg://gsb:gsb@localhost:5432/geostatusboard
+  schema: public
+  table: detected_roads

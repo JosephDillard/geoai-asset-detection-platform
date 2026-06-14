@@ -262,11 +262,12 @@ def run_road_stage(
             std=config.model_std,
             threshold=config.road_threshold,
             output_name=config.model_output_name,
+            backend=config.model_backend,
         )
         return StageResult(
             stage,
             count,
-            f"Wrote {count} road mask(s) to {config.mask_dir}",
+            f"Wrote {count} road mask(s) to {config.mask_dir} using {config.model_backend}",
             config.mask_dir,
         )
 

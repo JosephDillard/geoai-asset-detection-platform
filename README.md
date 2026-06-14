@@ -9,7 +9,7 @@ than bounding-box object detection:
 ```mermaid
 flowchart TD
     A["Imagery / COGs"] --> B["Tile extraction"]
-    B --> C["Road segmentation model (ONNX)"]
+    B --> C["Road segmentation model (ONNX or Keras)"]
     C --> D["Road masks"]
     D --> E["Road polygons as GeoJSON / GeoPackage"]
     E --> F["PostGIS"]
@@ -19,7 +19,7 @@ flowchart TD
 ## What This Sets Up
 
 - Extract georeferenced image tiles from a GeoTIFF or Cloud Optimized GeoTIFF.
-- Run an ONNX road segmentation model against each tile.
+- Run an ONNX or Keras road segmentation model against each tile.
 - Convert binary road masks into GeoJSON or GeoPackage polygons.
 - Optionally load detected roads into PostGIS.
 - Define and run up to 10 configured GeoAI workflows from one catalog.
@@ -53,8 +53,17 @@ Recommended model families:
 - DeepLabV3+
 - SegFormer
 
-Export the trained model to ONNX with an RGB input shaped like `[1, 3, H, W]` and a
-single road mask output, or a two-class background/road output.
+Export a trained model to ONNX with an RGB input shaped like `[1, 3, H, W]` and a
+single road mask output, or a two-class background/road output. The pipeline also
+supports Keras `.keras`, `.h5`, and `.hdf5` models with RGB input shaped like
+`[1, H, W, 3]`.
+
+The open-source road model currently configured for local testing is the
+MIT-licensed Hugging Face Keras model
+[`spectrewolf8/aerial-image-road-segmentation-with-U-NET-xp`](https://huggingface.co/spectrewolf8/aerial-image-road-segmentation-with-U-NET-xp).
+The model card describes a U-Net-50 road-segmentation model trained with
+256x256 patches from the Massachusetts Roads Dataset and demonstrates a `0.8`
+prediction threshold.
 
 ## Setup
 
@@ -85,10 +94,28 @@ The generated demo COG uses projected meter-scale pixels. If you created demo as
 before this change and see very wide road polygons from `example-cog.tif`, rerun
 `python scripts/create_demo_assets.py` so the local demo raster is regenerated.
 
+### Use The Open-Source HF U-Net/Keras Model
+
+Download the HF model into the ignored local `models/` directory:
+
+```powershell
+python scripts\download_hf_road_model.py
+```
+
+Install the optional Keras backend in a Python 3.10-3.12 environment:
+
+```powershell
+python -m pip install -e ".[keras]"
+```
+
+TensorFlow is intentionally optional. The default ONNX/demo workflows continue to run
+without it, and the Keras dependency is guarded so Python 3.13+ environments do not
+try to install an unsupported TensorFlow wheel.
+
 ### Fetch Real New Mexico Imagery
 
-For more realistic pipeline testing, fetch a small 2022 NAIP COG sample near
-Albuquerque, New Mexico:
+For more realistic pipeline testing, fetch a small 2022 NAIP COG sample around
+Taos, New Mexico:
 
 ```powershell
 python scripts\fetch_new_mexico_cog.py
@@ -97,7 +124,7 @@ python scripts\fetch_new_mexico_cog.py
 This queries the Microsoft Planetary Computer NAIP STAC collection, crops a
 manageable subset from the selected public NAIP COG, and writes:
 
-- `data/imagery/new-mexico-naip-abq-cog.tif`
+- `data/imagery/new-mexico-naip-taos-cog.tif`
 
 The matching workflow config is:
 
@@ -125,12 +152,55 @@ detected roads can be loaded and published by that app's GeoServer stack. If you
 use this repo's standalone PostGIS service instead, copy the config and point
 `postgis.url` at your local database.
 
+### Docker Dev Runtime
+
+For the recommended laptop setup, run GeoAI in Docker with Python 3.12 and
+TensorFlow/Keras while the Grails status-board app continues to run from IntelliJ or
+`bootRun`. The companion `geospatial-status-board` repo owns the shared local
+PostGIS/GeoServer Compose stack and includes a `geoai` profile that builds this repo:
+
+```powershell
+cd ..\geospatial-status-board
+.\dev.ps1 up-geoai
+```
+
+After changing the GeoAI Dockerfile or Python dependencies, rebuild explicitly:
+
+```powershell
+.\dev.ps1 build-geoai
+.\dev.ps1 up-geoai
+```
+
+That starts:
+
+- `gsb-postgis` on `localhost:5432`
+- `gsb-geoserver` on `http://localhost:8081/geoserver`
+- `gsb-geoai` on `http://localhost:8000`
+
+The GeoAI container bind-mounts this repo's `src/`, `config/`, `scripts/`, and `sql/`
+folders for a faster dev loop, plus the ignored `data/`, `models/`, `outputs/`, and
+`logs/` directories for local artifacts. On first start it downloads the HF U-Net/Keras
+model and fetches the Taos NAIP sample COG if they are missing. To disable either
+startup download, set these Compose environment values to `false` in the status-board
+`.env` file:
+
+```text
+GEOAI_DOWNLOAD_HF_MODEL=false
+GEOAI_FETCH_SAMPLE_COG=false
+```
+
+Inside Docker, `GEOAI_POSTGIS_URL` points at the Compose service name `postgis`.
+When running GeoAI directly on Windows, the YAML config still points at
+`localhost:5432`.
+
 ## Configure
 
 Copy `config/roads.example.yaml` to a local config file and update:
 
 - `imagery.source`: path to your COG or GeoTIFF
-- `model.path`: path to your exported road segmentation `.onnx` model
+- `model.path`: path to your road segmentation `.onnx` or Keras model
+- `model.backend`: `onnx` or `keras`; omitted values are inferred from the model
+  file suffix
 - `project.processing_crs`: projected CRS used for area filtering and simplification
 - `project.output_crs`: CRS written to the final vector output; the example uses
   `EPSG:4326` for GeoServer WFS and web maps
@@ -142,6 +212,10 @@ Copy `config/roads.example.yaml` to a local config file and update:
   coarse for road-surface extraction
 - `vectorization.max_mask_coverage`: skip a tile when an implausibly large fraction
   of the mask is classified as road
+
+The `GEOAI_POSTGIS_URL` environment variable overrides `postgis.url`, which is how
+the Docker service targets the Compose PostGIS hostname without duplicating every
+workflow config file.
 
 ## Run
 
@@ -184,16 +258,28 @@ Run selected workflows:
 geoai-roads run-workflows --catalog config/workflows.example.yaml --workflow roads-local
 ```
 
-Run the New Mexico NAIP sample workflow:
+Run the Taos NAIP sample workflow:
 
 ```powershell
 geoai-roads run-workflows --catalog config/workflows.example.yaml --workflow roads-new-mexico-local
 ```
 
-Load the New Mexico NAIP sample into the status-board PostGIS layer:
+Load the Taos NAIP sample into the status-board PostGIS layer:
 
 ```powershell
 geoai-roads run-workflows --catalog config/workflows.example.yaml --workflow roads-new-mexico-postgis
+```
+
+Run the HF U-Net/Keras New Mexico sample workflow:
+
+```powershell
+geoai-roads run-workflows --catalog config/workflows.example.yaml --workflow roads-hf-unet-new-mexico-local
+```
+
+Load the HF U-Net/Keras New Mexico sample into the status-board PostGIS layer:
+
+```powershell
+geoai-roads run-workflows --catalog config/workflows.example.yaml --workflow roads-hf-unet-new-mexico-postgis
 ```
 
 Override the stages for the selected workflows:
@@ -296,5 +382,8 @@ Open `outputs/roads.gpkg` in QGIS to inspect detections. For web or ArcGIS expor
 - Treat the bundled ONNX model as a mechanics-only demo. On real NAIP imagery it can
   classify bright non-road surfaces as broad road blobs, so keep the quality filters
   enabled until a trained road model is supplied.
+- Prefer `config/roads.hf-unet-new-mexico.example.yaml` for open-source road-model
+  testing against the Taos NAIP sample. It uses 256x256 tiles, Keras NHWC input,
+  and the model card's `0.8` threshold.
 - For production centerlines, add a thinning/skeletonization step after mask generation,
   then snap and clean the resulting network in PostGIS or QGIS.

@@ -31,7 +31,7 @@ def tile(config_path: str) -> None:
 @main.command()
 @click.option("--config", "config_path", default="config/roads.example.yaml", show_default=True)
 def infer(config_path: str) -> None:
-    """Run ONNX road segmentation over extracted tiles."""
+    """Run road segmentation over extracted tiles."""
     config = load_config(config_path)
     _echo_stage_result(run_road_stage(config, "infer"))
 

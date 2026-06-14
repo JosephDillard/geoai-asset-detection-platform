@@ -31,6 +31,9 @@ dev = [
 demo = [
   "onnx>=1.18",
 ]
+keras = [
+  "tensorflow>=2.16; python_version < '3.13'",
+]
 
 [project.scripts]
 geoai-roads = "geoai_roads.cli:main"

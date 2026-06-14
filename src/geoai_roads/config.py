@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,19 @@ class RoadConfig:
     @property
     def model_path(self) -> Path:
         return self._path("model", "path")
+
+    @property
+    def model_backend(self) -> str:
+        value = self.raw["model"].get("backend")
+        if value:
+            backend = str(value).strip().lower()
+        else:
+            suffix = self.model_path.suffix.lower()
+            backend = "keras" if suffix in {".keras", ".h5", ".hdf5"} else "onnx"
+
+        if backend not in {"onnx", "keras"}:
+            raise ValueError("model.backend must be one of: keras, onnx")
+        return backend
 
     @property
     def model_input_size(self) -> int:
@@ -95,6 +109,9 @@ class RoadConfig:
 
     @property
     def postgis_url(self) -> str:
+        override = os.getenv("GEOAI_POSTGIS_URL")
+        if override:
+            return override
         return str(self.raw["postgis"]["url"])
 
     @property
