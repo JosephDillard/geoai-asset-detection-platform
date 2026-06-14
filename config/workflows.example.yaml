@@ -1,0 +1,17 @@
+# Define up to 10 GeoAI workflows. Paths are relative to this catalog file.
+workflows:
+  - id: roads-local
+    name: Road detection - local imagery
+    type: roads
+    enabled: true
+    config: roads.example.yaml
+    stages: [tile, infer, vectorize]
+
+  - id: roads-local-postgis
+    name: Road detection - local imagery to PostGIS
+    type: roads
+    enabled: false
+    config: roads.example.yaml
+    stages: [tile, infer, vectorize, load-postgis]
+    postgis:
+      if_exists: append

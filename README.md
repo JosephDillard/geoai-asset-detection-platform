@@ -22,6 +22,8 @@ flowchart TD
 - Run an ONNX road segmentation model against each tile.
 - Convert binary road masks into GeoJSON or GeoPackage polygons.
 - Optionally load detected roads into PostGIS.
+- Define and run up to 10 configured GeoAI workflows from one catalog.
+- Expose workflow execution through a REST API with an interactive `/docs` UI.
 
 ## Suggested Model Path
 
@@ -85,6 +87,83 @@ Load into PostGIS:
 
 ```powershell
 geoai-roads load-postgis --config config/roads.example.yaml
+```
+
+## Run Multiple Workflows
+
+Use `config/workflows.example.yaml` as the catalog for multiple GeoAI workflow
+definitions. Each workflow points to a road-detection config file, so you can keep
+different imagery, model, threshold, output, and PostGIS settings separate.
+
+Run every enabled workflow in the catalog:
+
+```powershell
+geoai-roads run-workflows --catalog config/workflows.example.yaml
+```
+
+Run selected workflows:
+
+```powershell
+geoai-roads run-workflows --catalog config/workflows.example.yaml --workflow roads-local
+```
+
+Override the stages for the selected workflows:
+
+```powershell
+geoai-roads run-workflows --catalog config/workflows.example.yaml --stage infer --stage vectorize
+```
+
+## REST API And Interactive UI
+
+Start the API server:
+
+```powershell
+geoai-roads serve --host 127.0.0.1 --port 8000 --catalog config/workflows.example.yaml
+```
+
+Open the interactive API UI at:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+The manual form in `/docs` uses dropdowns for fixed choices such as request
+source and workflow stages. External apps submit the same JSON body to `POST /runs`.
+Use `GET /run-options` to populate dropdown values in another app or a custom GUI.
+
+Useful endpoints:
+
+- `GET /health`
+- `GET /workflows`
+- `GET /run-options`
+- `POST /runs`
+- `GET /runs`
+- `GET /runs/{run_id}`
+
+Example run request body:
+
+```json
+{
+  "request_source": "manual",
+  "submitted_by": "gis-operator",
+  "external_request_id": null,
+  "workflow_ids": ["roads-local"],
+  "stages": ["tile", "infer", "vectorize"],
+  "notes": "Run from the manual API form."
+}
+```
+
+External app example:
+
+```json
+{
+  "request_source": "external_app",
+  "submitted_by": "asset-management-system",
+  "external_request_id": "AMS-2026-00042",
+  "workflow_ids": ["roads-local"],
+  "stages": ["tile", "infer", "vectorize"],
+  "notes": "Submitted from upstream work order."
+}
 ```
 
 ## Outputs

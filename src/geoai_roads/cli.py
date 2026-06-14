@@ -5,10 +5,14 @@ from pathlib import Path
 import click
 
 from geoai_roads.config import load_config
-from geoai_roads.inference import infer_tiles
-from geoai_roads.postgis import load_vectors_to_postgis
-from geoai_roads.tiling import extract_tiles
-from geoai_roads.vectorize import vectorize_masks
+from geoai_roads.orchestrator import (
+    ROAD_STAGES,
+    StageResult,
+    WorkflowResult,
+    run_road_pipeline,
+    run_road_stage,
+    run_workflow_catalog,
+)
 
 
 @click.group()
@@ -21,14 +25,7 @@ def main() -> None:
 def tile(config_path: str) -> None:
     """Extract georeferenced tiles from the configured imagery."""
     config = load_config(config_path)
-    count = extract_tiles(
-        source=config.imagery_source,
-        output_dir=config.tile_dir,
-        bands=config.imagery_bands,
-        tile_size=config.tile_size,
-        overlap=config.tile_overlap,
-    )
-    click.echo(f"Extracted {count} tile(s) to {config.tile_dir}")
+    _echo_stage_result(run_road_stage(config, "tile"))
 
 
 @main.command()
@@ -36,17 +33,7 @@ def tile(config_path: str) -> None:
 def infer(config_path: str) -> None:
     """Run ONNX road segmentation over extracted tiles."""
     config = load_config(config_path)
-    count = infer_tiles(
-        tile_dir=config.tile_dir,
-        mask_dir=config.mask_dir,
-        model_path=config.model_path,
-        input_size=config.model_input_size,
-        mean=config.model_mean,
-        std=config.model_std,
-        threshold=config.road_threshold,
-        output_name=config.model_output_name,
-    )
-    click.echo(f"Wrote {count} road mask(s) to {config.mask_dir}")
+    _echo_stage_result(run_road_stage(config, "infer"))
 
 
 @main.command()
@@ -54,15 +41,7 @@ def infer(config_path: str) -> None:
 def vectorize(config_path: str) -> None:
     """Convert road masks to GeoJSON or GeoPackage polygons."""
     config = load_config(config_path)
-    count = vectorize_masks(
-        mask_dir=config.mask_dir,
-        output_path=config.vector_output,
-        processing_crs=config.processing_crs,
-        output_crs=config.output_crs,
-        min_area_m2=config.min_area_m2,
-        simplify_tolerance_m=config.simplify_tolerance_m,
-    )
-    click.echo(f"Wrote {count} road feature group(s) to {config.vector_output}")
+    _echo_stage_result(run_road_stage(config, "vectorize"))
 
 
 @main.command("load-postgis")
@@ -76,14 +55,7 @@ def vectorize(config_path: str) -> None:
 def load_postgis(config_path: str, if_exists: str) -> None:
     """Load vectorized roads into PostGIS."""
     config = load_config(config_path)
-    count = load_vectors_to_postgis(
-        vector_path=config.vector_output,
-        database_url=config.postgis_url,
-        schema=config.postgis_schema,
-        table=config.postgis_table,
-        if_exists=if_exists,
-    )
-    click.echo(f"Loaded {count} road feature(s) into {config.postgis_schema}.{config.postgis_table}")
+    _echo_stage_result(run_road_stage(config, "load-postgis", if_exists))
 
 
 @main.command()
@@ -91,10 +63,85 @@ def load_postgis(config_path: str, if_exists: str) -> None:
 def run(config_path: str) -> None:
     """Run tile, infer, and vectorize in order."""
     config_file = Path(config_path)
-    ctx = click.get_current_context()
-    ctx.invoke(tile, config_path=str(config_file))
-    ctx.invoke(infer, config_path=str(config_file))
-    ctx.invoke(vectorize, config_path=str(config_file))
+    for result in run_road_pipeline(config_file):
+        _echo_stage_result(result)
+
+
+@main.command("run-workflows")
+@click.option(
+    "--catalog",
+    "catalog_path",
+    default="config/workflows.example.yaml",
+    show_default=True,
+)
+@click.option(
+    "--workflow",
+    "workflow_ids",
+    multiple=True,
+    help="Workflow id to run. Repeat to run multiple workflows. Defaults to enabled workflows.",
+)
+@click.option(
+    "--stage",
+    "stages",
+    multiple=True,
+    type=click.Choice(ROAD_STAGES),
+    help="Override stages for every selected workflow. Repeat in execution order.",
+)
+def run_workflows(
+    catalog_path: str,
+    workflow_ids: tuple[str, ...],
+    stages: tuple[str, ...],
+) -> None:
+    """Run one or more workflows from a workflow catalog."""
+    results = run_workflow_catalog(
+        catalog_path,
+        workflow_ids=workflow_ids or None,
+        stages=stages or None,
+    )
+    _echo_workflow_results(results)
+
+    failed = [result for result in results if result.status == "failed"]
+    if failed:
+        raise click.ClickException(f"{len(failed)} workflow(s) failed")
+
+
+@main.command()
+@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--port", default=8000, show_default=True, type=int)
+@click.option(
+    "--catalog",
+    "catalog_path",
+    default="config/workflows.example.yaml",
+    show_default=True,
+    envvar="GEOAI_WORKFLOW_CATALOG",
+)
+def serve(host: str, port: int, catalog_path: str) -> None:
+    """Start the REST API and interactive Swagger UI."""
+    try:
+        import uvicorn
+
+        from geoai_roads.api import create_app
+    except ImportError as exc:
+        raise click.ClickException(
+            "REST dependencies are missing. Install the project dependencies and try again."
+        ) from exc
+
+    click.echo(f"Serving GeoAI Workflow API at http://{host}:{port}")
+    click.echo(f"Interactive API UI: http://{host}:{port}/docs")
+    uvicorn.run(create_app(default_catalog=catalog_path), host=host, port=port)
+
+
+def _echo_stage_result(result: StageResult) -> None:
+    click.echo(result.message)
+
+
+def _echo_workflow_results(results: list[WorkflowResult]) -> None:
+    for result in results:
+        click.echo(f"[{result.workflow_id}] {result.status}: {result.name}")
+        for stage in result.stages:
+            click.echo(f"  - {stage.message}")
+        if result.error:
+            click.echo(f"  ! {result.error}")
 
 
 if __name__ == "__main__":
