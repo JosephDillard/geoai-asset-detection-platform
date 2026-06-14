@@ -8,6 +8,7 @@ from rasterio.transform import from_origin
 
 from geoai_roads.config import RoadConfig
 from geoai_roads.inference import _predict_probability_with_tta, _write_mask, preprocess_tile_keras
+from geoai_roads.training import load_building_training_config
 
 
 def _road_config(model: dict[str, object]) -> RoadConfig:
@@ -212,3 +213,30 @@ def test_write_mask_can_save_probability_raster(tmp_path: Path) -> None:
     with rasterio.open(probability_dir / "tile_building_probability.tif") as probability_raster:
         assert probability_raster.dtypes == ("float32",)
         assert np.allclose(probability_raster.read(1), probability)
+
+
+def test_building_training_config_resolves_paths(tmp_path: Path) -> None:
+    config_path = tmp_path / "config" / "training.yaml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        """
+model:
+  architecture: unetplusplus
+  encoder_name: efficientnet-b4
+  base_path: models/base.pth
+  output_path: models/output.pth
+training:
+  chips_dir: outputs/training
+  epochs: 2
+  batch_size: 4
+""",
+        encoding="utf-8",
+    )
+
+    config = load_building_training_config(config_path)
+
+    assert config.architecture == "unetplusplus"
+    assert config.encoder_name == "efficientnet-b4"
+    assert config.epochs == 2
+    assert config.batch_size == 4
+    assert config.chips_dir == tmp_path / "outputs" / "training"

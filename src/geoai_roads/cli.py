@@ -59,6 +59,48 @@ def threshold_sweep(config_path: str, if_exists: str, job_id: str | None) -> Non
     _echo_stage_result(run_road_stage(config, "threshold-sweep", if_exists, job_id=job_id))
 
 
+@main.command("export-training-chips")
+@click.option(
+    "--config",
+    "config_path",
+    default="config/training.whu-taos.example.yaml",
+    show_default=True,
+)
+def export_training_chips_command(config_path: str) -> None:
+    """Export image/mask training chips from imagery and QGIS labels."""
+    from geoai_roads.training_data import export_training_chips, load_training_data_config
+
+    try:
+        config = load_training_data_config(config_path)
+        summary = export_training_chips(config)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    for key, value in summary.items():
+        click.echo(f"{key}: {value}")
+
+
+@main.command("train-building-model")
+@click.option(
+    "--config",
+    "config_path",
+    default="config/training.whu-taos.example.yaml",
+    show_default=True,
+)
+def train_building_model_command(config_path: str) -> None:
+    """Fine-tune the WHU building model from exported training chips."""
+    from geoai_roads.training import load_building_training_config, train_building_model
+
+    try:
+        config = load_building_training_config(config_path)
+        result = train_building_model(config)
+    except Exception as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(f"best_model: {result['best_model']}")
+    click.echo(f"metrics: {config.metrics_path}")
+
+
 @main.command("load-postgis")
 @click.option("--config", "config_path", default="config/roads.example.yaml", show_default=True)
 @click.option(

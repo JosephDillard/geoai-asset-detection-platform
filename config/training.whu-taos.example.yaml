@@ -1,0 +1,50 @@
+project:
+  name: whu-taos-building-finetune
+
+asset:
+  class_name: building
+
+imagery:
+  source: data/imagery/new-mexico-naip-taos-cog.tif
+  bands: [1, 2, 3]
+
+labels:
+  # Create this file from QGIS after correcting the current GeoAI building output.
+  # Recommended layer name: buildings
+  source: data/labels/taos_building_labels.gpkg
+  layer: buildings
+
+training_data:
+  output_dir: outputs/training/whu_taos_buildings
+  tile_size: 256
+  overlap: 64
+  validation_fraction: 0.2
+  include_empty_fraction: 0.15
+  min_mask_pixels: 16
+  all_touched: false
+  skip_partial_tiles: true
+  seed: 13
+
+model:
+  architecture: unetplusplus
+  encoder_name: efficientnet-b4
+  num_channels: 3
+  num_classes: 2
+  input_size: 512
+  base_path: models/whu-building-unetplusplus-efficientnet-b4.pth
+  output_path: models/whu-building-unetplusplus-efficientnet-b4-taos-finetuned.pth
+  mean: [0.0, 0.0, 0.0]
+  std: [1.0, 1.0, 1.0]
+
+training:
+  chips_dir: outputs/training/whu_taos_buildings
+  epochs: 20
+  batch_size: 2
+  learning_rate: 0.0001
+  weight_decay: 0.00001
+  ce_weight: 0.5
+  dice_weight: 0.5
+  num_workers: 0
+  device: auto
+  seed: 13
+  metrics_path: outputs/training/whu_taos_buildings/metrics.json

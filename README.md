@@ -351,6 +351,51 @@ Load WHU building detections into the status-board PostGIS layer:
 geoai-roads run-workflows --catalog config/workflows.example.yaml --workflow buildings-whu-taos-postgis
 ```
 
+## Fine-Tune The Building Model
+
+QGIS is the recommended open-source tool for correcting training labels. It is
+not the training engine; it is where you edit polygons. The neural-network
+training runs in this repo with PyTorch.
+
+Suggested label loop:
+
+1. Run the current WHU building workflow and inspect the output in the status-board
+   map or QGIS.
+2. In QGIS, create/correct building polygons over the Taos NAIP COG:
+   `data/imagery/new-mexico-naip-taos-cog.tif`.
+3. Save corrected polygons to:
+   `data/labels/taos_building_labels.gpkg`
+   with layer name `buildings`.
+4. Export image/mask chips:
+
+```powershell
+geoai-roads export-training-chips --config config/training.whu-taos.example.yaml
+```
+
+or:
+
+```powershell
+python scripts\export_training_chips.py --config config/training.whu-taos.example.yaml
+```
+
+5. Fine-tune from the WHU checkpoint:
+
+```powershell
+geoai-roads train-building-model --config config/training.whu-taos.example.yaml
+```
+
+or:
+
+```powershell
+python scripts\train_building_model.py --config config/training.whu-taos.example.yaml
+```
+
+The example training config writes chips under
+`outputs/training/whu_taos_buildings` and saves the best checkpoint to
+`models/whu-building-unetplusplus-efficientnet-b4-taos-finetuned.pth`. After
+training, point `config/buildings.whu-taos.example.yaml` at that checkpoint and
+rerun the building workflow.
+
 Override the stages for the selected workflows:
 
 ```powershell
