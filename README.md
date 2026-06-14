@@ -25,6 +25,16 @@ flowchart TD
 - Define and run up to 10 configured GeoAI workflows from one catalog.
 - Expose workflow execution through a REST API with an interactive `/docs` UI.
 
+## Related Documentation
+
+These links assume this repo sits next to the status board repo in the same parent
+folder.
+
+- [Geospatial Status Board README](../geospatial-status-board/README.md) - Grails,
+  MapLibre, GeoServer, and PostGIS status-board app.
+- [Geospatial Status Board Architecture](../geospatial-status-board/docs/geospatial-architecture.md)
+  - map, GeoServer, PostGIS, and GeoAI integration notes.
+
 ## Suggested Model Path
 
 Start with a road segmentation model trained on one of these label sources:
