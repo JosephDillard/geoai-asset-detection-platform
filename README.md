@@ -137,8 +137,10 @@ python -m pip install -e ".[dev,pytorch]"
 ```
 
 For the least-input developer path, use the Docker image from the companion status
-board repo. It installs pytest/dev tooling, CPU-only PyTorch, and downloads the WHU
-model automatically.
+board repo. It installs pytest/dev tooling, CUDA-enabled PyTorch by default, and
+downloads the WHU model automatically. To build a CPU-only image instead, set
+`GEOAI_PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cpu` in the status-board
+repo's `.env` before rebuilding the GeoAI image.
 
 ### Fetch Real New Mexico Imagery
 
@@ -184,8 +186,10 @@ use this repo's standalone PostGIS service instead, copy the config and point
 
 For the recommended laptop setup, run GeoAI in Docker with Python 3.12 and
 TensorFlow/Keras while the Grails status-board app continues to run from IntelliJ or
-`bootRun`. The companion `geospatial-status-board` repo owns the shared local
-PostGIS/GeoServer Compose stack and includes a `geoai` profile that builds this repo:
+`bootRun`. On NVIDIA RTX laptops, the container requests one NVIDIA GPU and uses
+CUDA-enabled PyTorch wheels by default. The companion `geospatial-status-board` repo
+owns the shared local PostGIS/GeoServer Compose stack and includes a `geoai` profile
+that builds this repo:
 
 ```powershell
 cd ..\geospatial-status-board
@@ -362,6 +366,11 @@ The no-login web training pages are available from the GeoAI service:
 ```text
 http://localhost:8000/training
 ```
+
+The export page groups the label package, source COG, OSM building download,
+and chip export controls in one place:
+
+![GeoAI training export page](docs/images/training-export-page.png)
 
 Use `Export` to download a QGIS label package, download the imagery COG,
 download OSM building footprints for the COG or label extent, or generate/download

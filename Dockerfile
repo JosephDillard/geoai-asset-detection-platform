@@ -6,6 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+ARG PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu126
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         libgomp1 \
@@ -17,7 +19,7 @@ COPY pyproject.toml README.md requirements.txt ./
 COPY src ./src
 
 RUN python -m pip install --upgrade pip setuptools wheel \
-    && python -m pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision \
+    && python -m pip install --index-url "${PYTORCH_INDEX_URL}" torch torchvision \
     && python -m pip install -e ".[dev,keras,pytorch]"
 
 COPY config ./config
