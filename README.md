@@ -357,6 +357,16 @@ QGIS is the recommended open-source tool for correcting training labels. It is
 not the training engine; it is where you edit polygons. The neural-network
 training runs in this repo with PyTorch.
 
+The no-login web training pages are available from the GeoAI service:
+
+```text
+http://localhost:8000/training
+```
+
+Use `Export` to download a QGIS label package, download the imagery COG, or
+generate/download training chips.
+Use `Import` to upload corrected QGIS labels back into `data/labels`.
+
 Suggested label loop:
 
 1. Run the current WHU building workflow and inspect the output in the status-board

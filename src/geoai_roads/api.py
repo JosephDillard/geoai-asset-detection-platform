@@ -23,6 +23,7 @@ from geoai_roads.orchestrator import (
     normalize_road_stages,
     run_workflow,
 )
+from geoai_roads.training_web import register_training_routes
 
 DEFAULT_CATALOG = "config/workflows.example.yaml"
 DEFAULT_CORS_ORIGINS = (
@@ -251,6 +252,7 @@ def create_app(
     app.state.default_catalog = str(default_catalog)
     app.state.run_store = RunStore()
     app.state.executor = ThreadPoolExecutor(max_workers=max_workers)
+    register_training_routes(app)
 
     @app.on_event("shutdown")
     def _shutdown_executor() -> None:
@@ -273,6 +275,7 @@ def create_app(
                 "workflows": "/workflows",
                 "run_options": "/run-options",
                 "runs": "/runs",
+                "training": "/training",
             },
             "max_workflows": MAX_WORKFLOWS,
             "models": [model.as_dict() for model in catalog.models],
