@@ -2,15 +2,20 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from html import escape
+import json
 from pathlib import Path
 import shutil
-from urllib.parse import quote
+import urllib.error
+import urllib.request
+from urllib.parse import quote, urlencode
 import zipfile
 
 import geopandas as gpd
 import rasterio
+from rasterio.warp import transform_bounds
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
+from shapely.geometry import MultiPolygon, Polygon
 
 from geoai_roads.training_data import (
     TrainingDataConfig,
@@ -20,6 +25,8 @@ from geoai_roads.training_data import (
 
 DEFAULT_TRAINING_CONFIG = "config/training.whu-taos.example.yaml"
 DEFAULT_SEED_LABELS = "outputs/whu_taos_buildings.gpkg"
+DEFAULT_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+OSM_BUILDING_LAYER = "osm_buildings"
 
 
 def register_training_routes(
@@ -72,6 +79,22 @@ def register_training_routes(
             imagery_path,
             media_type="image/tiff",
             filename=imagery_path.name,
+        )
+
+    @app.get("/training/export/osm-buildings")
+    def download_osm_buildings(
+        config_path: str | None = None,
+        extent: str = "imagery",
+    ) -> FileResponse:
+        config = _load_config(config_path or app.state.default_training_config)
+        try:
+            buildings_path = build_osm_buildings_export(config, extent)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return FileResponse(
+            buildings_path,
+            media_type="application/geopackage+sqlite3",
+            filename=buildings_path.name,
         )
 
     @app.post("/training/export/chips", response_class=HTMLResponse)
@@ -180,6 +203,22 @@ def build_training_chips_package(config: TrainingDataConfig) -> Path:
     zip_path = export_dir / f"{_timestamp_slug('training_chips')}.zip"
     _zip_directory(config.output_dir, zip_path)
     return zip_path
+
+
+def build_osm_buildings_export(
+    config: TrainingDataConfig,
+    extent_source: str = "imagery",
+) -> Path:
+    bbox = _extent_bbox(config, extent_source)
+    osm_data = _fetch_osm_buildings(bbox)
+    buildings = _osm_buildings_frame(osm_data, extent_source)
+
+    export_dir = config.output_dir.parent / "exports"
+    export_dir.mkdir(parents=True, exist_ok=True)
+    slug = _timestamp_slug(f"osm_buildings_{_extent_slug(extent_source)}")
+    path = export_dir / f"{slug}.gpkg"
+    _write_label_frame(buildings, path, OSM_BUILDING_LAYER)
+    return path
 
 
 def save_uploaded_labels(
@@ -300,6 +339,23 @@ def _export_body(
         </dl>
         {download_imagery}
       </section>
+      <form class="training-panel" method="get" action="/training/export/osm-buildings">
+        <h2>OSM Buildings</h2>
+        <p class="panel-copy">Download OpenStreetMap building footprints as a GeoPackage.
+        Choose the COG extent or the label-package extent when they do not match.</p>
+        <input type="hidden" name="config_path" value="{escape(str(config.path))}">
+        <label>Extent source
+          <select name="extent">
+            <option value="imagery">COG extent</option>
+            <option value="labels">Label package extent</option>
+          </select>
+        </label>
+        <ul class="content-list">
+          <li><strong>COG extent</strong> uses the raster footprint from the imagery source.</li>
+          <li><strong>Label package extent</strong> uses the current editable labels layer.</li>
+        </ul>
+        <button class="button primary" type="submit">Download OSM buildings</button>
+      </form>
       <form class="training-panel" method="post" action="/training/export/chips">
         <h2>Training Chips</h2>
         <p class="panel-copy">Generated model-training ZIP. After export, it contains:</p>
@@ -408,7 +464,7 @@ def _css() -> str:
     .content-list li { margin: 7px 0; }
     .content-list strong { color: var(--text); }
     label { display: grid; gap: 8px; color: var(--muted); font-weight: 700; margin-bottom: 16px; }
-    input { width: 100%; min-height: 40px; border-radius: 6px; border: 1px solid var(--line); background: #06192a; color: var(--text); padding: 8px 10px; }
+    input, select { width: 100%; min-height: 40px; border-radius: 6px; border: 1px solid var(--line); background: #06192a; color: var(--text); padding: 8px 10px; }
     input[type=file] { padding: 8px; }
     button { font: inherit; }
     .status-list { display: grid; grid-template-columns: minmax(120px, .35fr) 1fr; gap: 8px 14px; margin: 0 0 16px; }
@@ -503,6 +559,170 @@ def _label_frame_for_export(config: TrainingDataConfig) -> gpd.GeoDataFrame:
         with rasterio.open(config.imagery_source) as dataset:
             crs = dataset.crs or crs
     return gpd.GeoDataFrame({"class_name": []}, geometry=[], crs=crs)
+
+
+def _extent_bbox(config: TrainingDataConfig, extent_source: str) -> tuple[float, float, float, float]:
+    source = _normalize_extent_source(extent_source)
+    if source == "imagery":
+        return _imagery_extent_bbox(config)
+    return _label_extent_bbox(config)
+
+
+def _normalize_extent_source(extent_source: str) -> str:
+    source = extent_source.strip().lower().replace("-", "_")
+    if source in {"imagery", "cog", "raster"}:
+        return "imagery"
+    if source in {"labels", "label", "label_package", "package"}:
+        return "labels"
+    raise ValueError("Extent must be 'imagery' or 'labels'.")
+
+
+def _extent_slug(extent_source: str) -> str:
+    return "labels" if _normalize_extent_source(extent_source) == "labels" else "imagery"
+
+
+def _imagery_extent_bbox(config: TrainingDataConfig) -> tuple[float, float, float, float]:
+    if not config.imagery_source.exists():
+        raise FileNotFoundError(f"Imagery COG not found: {config.imagery_source}")
+    with rasterio.open(config.imagery_source) as dataset:
+        west, south, east, north = dataset.bounds
+        if dataset.crs:
+            west, south, east, north = transform_bounds(
+                dataset.crs,
+                "EPSG:4326",
+                west,
+                south,
+                east,
+                north,
+                densify_pts=21,
+            )
+    return _validated_bbox(west, south, east, north)
+
+
+def _label_extent_bbox(config: TrainingDataConfig) -> tuple[float, float, float, float]:
+    labels = _label_frame_for_export(config)
+    if labels.empty:
+        raise ValueError("Label package extent is unavailable because the labels layer is empty.")
+    if labels.crs is None:
+        raise ValueError("Label package extent is unavailable because the labels layer has no CRS.")
+    west, south, east, north = labels.to_crs("EPSG:4326").total_bounds
+    return _validated_bbox(float(west), float(south), float(east), float(north))
+
+
+def _validated_bbox(
+    west: float,
+    south: float,
+    east: float,
+    north: float,
+) -> tuple[float, float, float, float]:
+    if west >= east or south >= north:
+        raise ValueError("Extent is invalid; expected west < east and south < north.")
+    west = max(-180.0, west)
+    east = min(180.0, east)
+    south = max(-90.0, south)
+    north = min(90.0, north)
+    return west, south, east, north
+
+
+def _fetch_osm_buildings(
+    bbox: tuple[float, float, float, float],
+    overpass_url: str = DEFAULT_OVERPASS_URL,
+) -> dict:
+    west, south, east, north = bbox
+    query = f"""
+    [out:json][timeout:180];
+    (
+      way["building"]({south:.8f},{west:.8f},{north:.8f},{east:.8f});
+      relation["building"]({south:.8f},{west:.8f},{north:.8f},{east:.8f});
+    );
+    out body geom;
+    """
+    payload = urlencode({"data": query}).encode("utf-8")
+    request = urllib.request.Request(
+        overpass_url,
+        data=payload,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "geoai-training-export/0.1",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Overpass request failed with HTTP {exc.code}: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Overpass request failed: {exc.reason}") from exc
+
+
+def _osm_buildings_frame(osm_data: dict, extent_source: str) -> gpd.GeoDataFrame:
+    rows = []
+    geometries = []
+    for element in osm_data.get("elements", []):
+        geometry = _osm_element_geometry(element)
+        if geometry is None or geometry.is_empty:
+            continue
+        tags = element.get("tags", {})
+        rows.append(
+            {
+                "osm_type": str(element.get("type", "")),
+                "osm_id": int(element.get("id", 0)),
+                "building": str(tags.get("building", "")),
+                "name": str(tags.get("name", "")),
+                "extent_source": _normalize_extent_source(extent_source),
+            }
+        )
+        geometries.append(geometry)
+
+    if not rows:
+        return gpd.GeoDataFrame(
+            {
+                "osm_type": [],
+                "osm_id": [],
+                "building": [],
+                "name": [],
+                "extent_source": [],
+            },
+            geometry=[],
+            crs="EPSG:4326",
+        )
+    return gpd.GeoDataFrame(rows, geometry=geometries, crs="EPSG:4326")
+
+
+def _osm_element_geometry(element: dict):
+    if element.get("type") == "way":
+        return _polygon_from_osm_coords(element.get("geometry", []))
+    if element.get("type") != "relation":
+        return None
+
+    polygons = []
+    for member in element.get("members", []):
+        if member.get("role") not in {"", "outer"}:
+            continue
+        polygon = _polygon_from_osm_coords(member.get("geometry", []))
+        if polygon is not None and not polygon.is_empty:
+            polygons.append(polygon)
+    if not polygons:
+        return None
+    if len(polygons) == 1:
+        return polygons[0]
+    return MultiPolygon(polygons)
+
+
+def _polygon_from_osm_coords(points: list[dict]) -> Polygon | None:
+    if len(points) < 4:
+        return None
+    coords = [(float(point["lon"]), float(point["lat"])) for point in points]
+    if coords[0] != coords[-1]:
+        coords.append(coords[0])
+    polygon = Polygon(coords)
+    if polygon.is_empty:
+        return None
+    if not polygon.is_valid:
+        polygon = polygon.buffer(0)
+    return polygon if not polygon.is_empty else None
 
 
 def _write_label_frame(frame: gpd.GeoDataFrame, path: Path, layer: str) -> None:

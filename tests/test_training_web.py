@@ -10,7 +10,11 @@ from shapely.geometry import box
 
 from geoai_roads.api import create_app
 from geoai_roads.training_data import load_training_data_config
-from geoai_roads.training_web import build_label_export_package, save_uploaded_labels
+from geoai_roads.training_web import (
+    build_label_export_package,
+    build_osm_buildings_export,
+    save_uploaded_labels,
+)
 
 
 def _write_imagery(path: Path) -> None:
@@ -108,6 +112,10 @@ def test_training_export_page_explains_downloads(tmp_path: Path) -> None:
     assert "taos_building_labels.gpkg" in response.text
     assert "manifest.csv" in response.text
     assert "/training/export/imagery" in response.text
+    assert "OSM Buildings" in response.text
+    assert "/training/export/osm-buildings" in response.text
+    assert "COG extent" in response.text
+    assert "Label package extent" in response.text
 
 
 def test_training_imagery_download_returns_configured_cog(tmp_path: Path) -> None:
@@ -120,6 +128,79 @@ def test_training_imagery_download_returns_configured_cog(tmp_path: Path) -> Non
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/tiff")
     assert "imagery.tif" in response.headers["content-disposition"]
+    assert len(response.content) > 0
+
+
+def test_osm_buildings_export_uses_requested_extent(tmp_path: Path, monkeypatch) -> None:
+    config_path = _write_training_config(tmp_path)
+    config = load_training_data_config(config_path)
+    calls = []
+
+    def fake_fetch(bbox):
+        calls.append(bbox)
+        return {
+            "elements": [
+                {
+                    "type": "way",
+                    "id": 123,
+                    "tags": {"building": "yes", "name": "Training Roof"},
+                    "geometry": [
+                        {"lat": 36.0, "lon": -105.0},
+                        {"lat": 36.0, "lon": -104.999},
+                        {"lat": 36.001, "lon": -104.999},
+                        {"lat": 36.001, "lon": -105.0},
+                        {"lat": 36.0, "lon": -105.0},
+                    ],
+                }
+            ]
+        }
+
+    monkeypatch.setattr("geoai_roads.training_web._fetch_osm_buildings", fake_fetch)
+
+    package_path = build_osm_buildings_export(config, "labels")
+
+    assert calls
+    assert package_path.exists()
+    buildings = gpd.read_file(package_path, layer="osm_buildings")
+    assert len(buildings) == 1
+    assert buildings.loc[0, "osm_id"] == 123
+    assert buildings.loc[0, "name"] == "Training Roof"
+    assert buildings.loc[0, "extent_source"] == "labels"
+
+
+def test_training_osm_buildings_download_returns_geopackage(tmp_path: Path, monkeypatch) -> None:
+    config_path = _write_training_config(tmp_path)
+    app = create_app(default_catalog="config/workflows.example.yaml", allowed_origins=[])
+    client = TestClient(app)
+
+    def fake_fetch(_bbox):
+        return {
+            "elements": [
+                {
+                    "type": "way",
+                    "id": 456,
+                    "tags": {"building": "house"},
+                    "geometry": [
+                        {"lat": 36.0, "lon": -105.0},
+                        {"lat": 36.0, "lon": -104.999},
+                        {"lat": 36.001, "lon": -104.999},
+                        {"lat": 36.001, "lon": -105.0},
+                        {"lat": 36.0, "lon": -105.0},
+                    ],
+                }
+            ]
+        }
+
+    monkeypatch.setattr("geoai_roads.training_web._fetch_osm_buildings", fake_fetch)
+
+    response = client.get(
+        "/training/export/osm-buildings",
+        params={"config_path": str(config_path), "extent": "imagery"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/geopackage+sqlite3")
+    assert "osm_buildings_imagery" in response.headers["content-disposition"]
     assert len(response.content) > 0
 
 

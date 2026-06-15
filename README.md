@@ -363,8 +363,9 @@ The no-login web training pages are available from the GeoAI service:
 http://localhost:8000/training
 ```
 
-Use `Export` to download a QGIS label package, download the imagery COG, or
-generate/download training chips.
+Use `Export` to download a QGIS label package, download the imagery COG,
+download OSM building footprints for the COG or label extent, or generate/download
+training chips.
 Use `Import` to upload corrected QGIS labels back into `data/labels`.
 
 Suggested label loop:

@@ -24,19 +24,19 @@ model:
   num_channels: 3
   num_classes: 2
   input_size: 512
-  path: models/whu-building-unetplusplus-efficientnet-b4.pth
+  path: models/whu-building-unetplusplus-efficientnet-b4-taos-finetuned.pth
   mean: [0.0, 0.0, 0.0]
   std: [1.0, 1.0, 1.0]
 
 inference:
   threshold: 0.35
   threshold_sweep: [0.25, 0.30, 0.35, 0.40, 0.45]
-  input_sizes: [512, 640]
+  input_sizes: [512]
   preserve_model_resolution: true
   save_probability: true
   probability_dir: outputs/whu_taos_building_probabilities
-  augmentations: [none, hflip, vflip, hvflip]
-  average_overlaps: true
+  augmentations: [none]
+  average_overlaps: false
   mask_cleanup:
     close_pixels: 1
     fill_holes_pixels: 96

@@ -1,0 +1,2 @@
+best_model: /app/models/whu-building-unetplusplus-efficientnet-b4-taos-finetuned.pth
+metrics: /app/outputs/training/whu_taos_buildings/metrics.json
