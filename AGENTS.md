@@ -4,16 +4,22 @@ This repo is the GeoAI workflow layer in the companion geospatial stack.
 It turns imagery into GIS-ready vector detections and can publish results to
 PostGIS for the status-board map.
 
+## Suggested GitHub Description
+
+Python GeoAI workflow platform for tiling imagery, running segmentation models, vectorizing detections, and loading GIS-ready outputs to GeoPackage/PostGIS.
+
 ## Stack Context
 
 Related sibling repos:
 
+- `geospatial-etl-validation-toolkit` validates customer/source geospatial data
+  before it is loaded, published, or used as training/analysis context.
 - `geospatial-status-board` visualizes PostGIS/GeoServer layers in a Grails and
   MapLibre web app.
 - `geospatial-data-gateway` ingests geospatial files into PostGIS and can notify
   map clients when layers refresh.
-- `geospatial-mcp-services` provides map-aware assistant tools, starting with a
-  GeoNames/Wikipedia MCP server.
+- `geospatial-mcp-services` provides map-aware assistant tools, including
+  GeoNames/Wikipedia lookup and incident analysis.
 
 When changing cross-repo docs or integration instructions, prefer full GitHub
 URLs for links that point outside this repo.
