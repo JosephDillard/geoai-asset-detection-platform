@@ -27,16 +27,18 @@ flowchart TD
 
 ## Repository Map
 
-This repo provides the GeoAI workflow API and road-detection pipeline. The companion
-status-board repo provides the Grails application, MapLibre map viewer, GeoServer
-configuration, PostGIS stack, and geospatial architecture notes that consume GeoAI
-outputs.
+This repo provides the GeoAI workflow API, COG processing, segmentation pipeline,
+PostGIS loading, and training/export utilities. The companion repos validate
+incoming data, load or stream layers, visualize results, and add map-aware
+assistant workflows.
 
+- [Portfolio site](https://josephdillard.github.io/JosephDillard/)
 - [GeoAI Asset Detection Platform repo](https://github.com/JosephDillard/geoai-asset-detection-platform)
-- [GeoAI Asset Detection Platform README](https://github.com/JosephDillard/geoai-asset-detection-platform/blob/main/README.md)
-- [Geospatial Status Board repo](https://github.com/JosephDillard/geospatial-status-board)
-- [Geospatial Status Board README](https://github.com/JosephDillard/geospatial-status-board/blob/master/README.md)
+- [Geospatial Status Board](https://github.com/JosephDillard/geospatial-status-board)
 - [Geospatial Status Board Architecture](https://github.com/JosephDillard/geospatial-status-board/blob/master/docs/geospatial-architecture.md)
+- [Geospatial Data Gateway](https://github.com/JosephDillard/geospatial-data-gateway)
+- [Geospatial ETL Validation Toolkit](https://github.com/JosephDillard/geospatial-etl-validation-toolkit)
+- [Geospatial MCP Services](https://github.com/JosephDillard/geospatial-mcp-services)
 
 ## Suggested Model Path
 
