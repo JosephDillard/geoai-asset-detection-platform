@@ -1,3 +1,5 @@
+[Portfolio Home: Joseph C. Dillard Geospatial Project Stack](https://josephdillard.github.io/JosephDillard/)
+
 # GeoAI Asset Detection Platform
 
 GeoAI pipeline for detecting geospatial assets from aerial or satellite imagery and
